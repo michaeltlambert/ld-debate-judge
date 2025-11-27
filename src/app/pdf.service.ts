@@ -1,47 +1,69 @@
 import { Injectable } from '@angular/core';
 import jsPDF from 'jspdf';
-import html2canvas from 'html2canvas';
+import { toPng } from 'html-to-image';
 
 @Injectable({ providedIn: 'root' })
 export class PdfService {
 
   async generateBallotPdf(flowElementId: string, ballotElementId: string) {
-    const pdf = new jsPDF('p', 'mm', 'a4');
-    const options = { scale: 2 }; // Improves resolution
-
-    // 1. Capture the Ballot (Page 1)
-    const ballotEl = document.getElementById(ballotElementId);
-    if (ballotEl) {
-      const canvas = await html2canvas(ballotEl, options);
-      const imgData = canvas.toDataURL('image/png');
-      const imgProps = pdf.getImageProperties(imgData);
+    try {
+      const pdf = new jsPDF('p', 'mm', 'a4');
       const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+      const pdfHeight = pdf.internal.pageSize.getHeight();
       
+      // Configuration to ensure white background and proper sizing
+      const options = { 
+        backgroundColor: '#ffffff',
+        pixelRatio: 2 // High resolution
+      };
+
+      // --- PAGE 1: BALLOT ---
+      const ballotEl = document.getElementById(ballotElementId);
+      if (!ballotEl) throw new Error(`Element #${ballotElementId} not found`);
+
+      // Convert DOM to PNG Data URL
+      const ballotImgData = await toPng(ballotEl, options);
+      
+      // Calculate aspect ratio to fit image on PDF
+      const ballotProps = pdf.getImageProperties(ballotImgData);
+      const ballotImgHeight = (ballotProps.height * pdfWidth) / ballotProps.width;
+
       pdf.setFontSize(18);
       pdf.text('Official Debate Ballot', 10, 15);
-      pdf.addImage(imgData, 'PNG', 0, 25, pdfWidth, pdfHeight);
-    }
+      pdf.addImage(ballotImgData, 'PNG', 0, 25, pdfWidth, ballotImgHeight);
 
-    // 2. Add New Page for the Flow
-    pdf.addPage();
+      // --- PAGE 2: FLOW SHEET ---
+      pdf.addPage();
+      const flowEl = document.getElementById(flowElementId);
+      if (!flowEl) throw new Error(`Element #${flowElementId} not found`);
 
-    // 3. Capture the Flow Sheet (Page 2)
-    const flowEl = document.getElementById(flowElementId);
-    if (flowEl) {
-      const canvas = await html2canvas(flowEl, options);
-      const imgData = canvas.toDataURL('image/png');
-      const imgProps = pdf.getImageProperties(imgData);
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      // Calculate height to fit page, allowing for long flows
-      const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+      // We need to temporarily force the flow container to be fully visible (no scroll)
+      // to capture the whole thing, then revert it.
+      const originalOverflow = flowEl.style.overflow;
+      flowEl.style.overflow = 'visible'; // Force full render
 
-      pdf.setFontSize(18);
+      const flowImgData = await toPng(flowEl, options);
+      
+      // Restore scroll
+      flowEl.style.overflow = originalOverflow;
+
+      const flowProps = pdf.getImageProperties(flowImgData);
+      // Fit to width, allow height to expand
+      const flowImgHeight = (flowProps.height * pdfWidth) / flowProps.width;
+
+      // Handle multi-page flow if it's too long (Basic implementation: Shrink to fit or just print)
+      // For now, we scale to width.
       pdf.text('Debate Flow / Notes', 10, 15);
-      pdf.addImage(imgData, 'PNG', 0, 25, pdfWidth, pdfHeight);
-    }
+      
+      // If flow is massive, we might want to scale it down, but let's stick to standard width
+      pdf.addImage(flowImgData, 'PNG', 0, 25, pdfWidth, flowImgHeight);
 
-    // 4. Save
-    pdf.save(`Debate_Ballot_${new Date().toISOString().slice(0,10)}.pdf`);
+      // Save
+      pdf.save(`Debate_Ballot_${new Date().toISOString().slice(0,10)}.pdf`);
+
+    } catch (err) {
+      console.error('Export Failed:', err);
+      alert('Could not generate PDF. Please try again.\nError: ' + err);
+    }
   }
 }

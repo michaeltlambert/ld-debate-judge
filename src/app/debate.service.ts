@@ -16,12 +16,12 @@ export class DebateService {
   readonly PREP_ALLOWANCE = 240; // 4 Minutes standard LD prep
   
   readonly phases: Phase[] = [
-    { id: '1AC', name: 'Aff Constructive', time: 360, hint: 'Aff presents Value, Criterion, and Contentions.' },
-    { id: 'CX1', name: 'Cross-Ex (Neg asks)', time: 180, hint: 'Neg clarifies arguments. No new arguments.' },
-    { id: '1NC', name: 'Neg Constructive', time: 420, hint: 'Neg presents case and attacks Aff.' },
-    { id: 'CX2', name: 'Cross-Ex (Aff asks)', time: 180, hint: 'Aff questions Neg. Look for contradictions.' },
+    { id: '1AC', name: 'Affirmative Constructive', time: 360, hint: 'Aff presents Value, Criterion, and Contentions.' },
+    { id: 'CX1', name: 'Cross-Ex (Neg Questions)', time: 180, hint: 'Neg clarifies arguments. No new arguments.' },
+    { id: '1NC', name: 'Negative Constructive', time: 420, hint: 'Neg presents case and attacks Aff.' },
+    { id: 'CX2', name: 'Cross-Ex (Aff Questions)', time: 180, hint: 'Aff questions Neg. Look for contradictions.' },
     { id: '1AR', name: '1st Aff Rebuttal', time: 240, hint: 'Aff must answer ALL Neg attacks here.' },
-    { id: '2NR', name: 'Neg Rebuttal', time: 360, hint: 'Neg closing speech. Crystallize voting issues.' },
+    { id: '2NR', name: 'Negative Rebuttal', time: 360, hint: 'Neg closing speech. Crystallize voting issues.' },
     { id: '2AR', name: '2nd Aff Rebuttal', time: 180, hint: 'Aff closing speech. Explain why Aff wins.' },
   ];
 
