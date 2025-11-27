@@ -1,0 +1,221 @@
+import { Component, signal, effect } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
+
+export interface DebateArgument {
+  id: string;
+  text: string;
+  colIdx: number; // Changed from 'speechIdx' to 'colIdx' for clarity
+  status: 'open' | 'addressed' | 'dropped';
+  parentId: string | null;
+}
+
+interface ColumnDef {
+  id: string;
+  name: string;
+  isCx: boolean;
+}
+
+@Component({
+  selector: 'app-flow',
+  standalone: true,
+  imports: [CommonModule, FormsModule],
+  template: `
+    <div id="debate-flow" class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 h-full flex flex-col">
+      <div class="mb-4 flex items-center justify-between">
+        <div>
+          <h2 class="font-bold text-slate-700">Interactive Flow Sheet</h2>
+          <p class="text-xs text-slate-500">
+            Includes <span class="bg-amber-100 text-amber-800 px-1 rounded font-bold">Cross-Ex</span> columns for tracking admissions.
+          </p>
+        </div>
+        <button (click)="resetFlow()" class="text-xs text-red-400 hover:text-red-600 underline">Clear All</button>
+      </div>
+      
+      <div class="flex-1 overflow-x-auto pb-12" (click)="closeMenus()"> 
+        <div class="flex h-full min-w-max divide-x divide-slate-200 border border-slate-200 rounded-lg bg-slate-50">
+          
+          <div *ngFor="let col of columns; let i = index" 
+               class="flex flex-col group transition-all"
+               [ngClass]="col.isCx ? 'w-64 bg-amber-50/50' : 'w-80 bg-slate-50'">
+            
+            <div class="p-3 text-center text-xs font-bold uppercase tracking-wider border-b border-slate-200 sticky top-0 z-10 shadow-sm"
+                 [ngClass]="col.isCx ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-600'">
+              {{ col.name }}
+            </div>
+
+            <div class="flex-1 p-2 space-y-3 overflow-y-auto min-h-[400px]">
+              
+              <div *ngFor="let arg of getArgsForCol(i)" 
+                   class="relative p-3 rounded-lg border shadow-sm transition-all group/card"
+                   [ngClass]="{
+                     'bg-white border-slate-200': arg.status === 'open',
+                     'bg-green-50 border-green-200 opacity-70': arg.status === 'addressed',
+                     'bg-red-50 border-red-200': arg.status === 'dropped'
+                   }">
+
+                <div *ngIf="isLinkedToPrevious(arg)" class="absolute -left-3 top-4 w-3 h-[2px] bg-slate-300"></div>
+
+                <div *ngIf="editingId() !== arg.id" (click)="editArg(arg.id, $event)" class="text-sm text-slate-800 whitespace-pre-wrap cursor-text min-h-[1.5rem]">
+                  {{ arg.text }}
+                </div>
+                <textarea *ngIf="editingId() === arg.id" 
+                  [(ngModel)]="arg.text" 
+                  (blur)="stopEditing()"
+                  (click)="$event.stopPropagation()"
+                  (keydown.enter)="$event.preventDefault(); stopEditing()"
+                  class="w-full text-sm p-1 border rounded focus:ring-2 focus:ring-blue-500 bg-white"
+                  autoFocus>
+                </textarea>
+
+                <div class="mt-2 flex justify-between items-center opacity-0 group-hover/card:opacity-100 transition-opacity">
+                  
+                  <div class="flex gap-1 items-center">
+                    <button (click)="setDrop(arg); $event.stopPropagation()" title="Drop" class="p-1 hover:text-red-600 text-slate-400"><span class="font-bold text-xs">✕</span></button>
+                    <button (click)="setAddressed(arg); $event.stopPropagation()" title="Address" class="p-1 hover:text-green-600 text-slate-400"><span class="font-bold text-xs">✓</span></button>
+                    <div class="w-px h-3 bg-slate-200 mx-1"></div>
+                    <button (click)="deleteArg(arg); $event.stopPropagation()" title="Delete" class="p-1 hover:text-slate-600 text-slate-300">
+                       <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                    </button>
+                  </div>
+
+                  <div class="relative">
+                    <button *ngIf="i < columns.length - 1" 
+                      (click)="toggleLinkMenu(arg.id, $event)"
+                      class="text-xs px-2 py-1 rounded border font-medium flex items-center gap-1 transition-colors"
+                      [ngClass]="col.isCx ? 'bg-amber-100 text-amber-700 border-amber-200 hover:bg-amber-200' : 'bg-blue-50 text-blue-600 border-blue-100 hover:bg-blue-100'">
+                      Link ⤵
+                    </button>
+
+                    <div *ngIf="activeLinkId() === arg.id" 
+                         (click)="$event.stopPropagation()"
+                         class="absolute right-0 top-full mt-1 w-36 bg-white rounded shadow-lg border border-slate-200 z-50 flex flex-col py-1">
+                      <div class="px-2 py-1 text-[10px] text-slate-400 font-bold uppercase tracking-wider border-b border-slate-100 mb-1">Link to...</div>
+                      
+                      <button *ngFor="let target of getFutureColumns(i)" 
+                              (click)="createLink(arg, target.idx)"
+                              class="text-left px-3 py-1.5 text-xs text-slate-700 hover:bg-blue-50 hover:text-blue-700 w-full flex justify-between items-center group/btn">
+                        <span>{{ target.name }}</span>
+                        <span *ngIf="target.isCx" class="text-[9px] bg-amber-100 text-amber-700 px-1 rounded">CX</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div *ngIf="arg.status === 'dropped'" class="absolute -top-2 -right-2 bg-red-500 text-white text-[10px] px-2 py-0.5 rounded-full font-bold shadow-sm z-10">DROP</div>
+              </div>
+
+              <div class="mt-2">
+                <input type="text" 
+                  [placeholder]="col.isCx ? '+ Note Admission...' : '+ New Point...'" 
+                  (keydown.enter)="addArg($event, i)"
+                  class="w-full text-xs p-2 bg-transparent border border-dashed border-slate-300 rounded hover:bg-white focus:ring-2 focus:ring-blue-500 transition-all">
+              </div>
+
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `
+})
+export class FlowComponent {
+  // LD Standard Order including CX
+  columns: ColumnDef[] = [
+    { id: '1AC', name: '1AC Case', isCx: false },
+    { id: 'CX1', name: 'CX (Neg Asks)', isCx: true },
+    { id: '1NC', name: '1NC Case', isCx: false },
+    { id: 'CX2', name: 'CX (Aff Asks)', isCx: true },
+    { id: '1AR', name: '1AR Rebuttal', isCx: false },
+    { id: '2NR', name: '2NR Rebuttal', isCx: false },
+    { id: '2AR', name: '2AR Voters', isCx: false }
+  ];
+  
+  arguments = signal<DebateArgument[]>([]);
+  editingId = signal<string | null>(null);
+  activeLinkId = signal<string | null>(null);
+
+  constructor() {
+    const saved = localStorage.getItem('ld-flow-data');
+    if (saved) {
+      // Migration: Ensure old data with 'speechIdx' maps to 'colIdx' if needed, or simply reset
+      // For simplicity in this demo, we assume clean slate or compatible data
+      try {
+        const data = JSON.parse(saved);
+        // Map old speechIdx to new colIdx structure if structure differs, 
+        // but since we just store the index number, clearing old data is safer for this structural change.
+        if(data.length > 0 && data[0].colIdx === undefined && data[0].speechIdx !== undefined) {
+           // Migration logic could go here, but let's default to empty to prevent crash
+           this.arguments.set([]); 
+        } else {
+           this.arguments.set(data);
+        }
+      } catch(e) { this.arguments.set([]); }
+    }
+
+    effect(() => localStorage.setItem('ld-flow-data', JSON.stringify(this.arguments())));
+  }
+
+  getArgsForCol(idx: number) {
+    return this.arguments().filter(a => a.colIdx === idx);
+  }
+
+  getFutureColumns(currentIdx: number) {
+    return this.columns
+      .map((col, idx) => ({ name: col.id, isCx: col.isCx, idx }))
+      .filter(c => c.idx > currentIdx);
+  }
+
+  createLink(originalArg: DebateArgument, targetIdx: number) {
+    this.updateArgStatus(originalArg.id, 'addressed');
+
+    const isSkip = targetIdx > originalArg.colIdx + 1;
+    const sourceName = this.columns[originalArg.colIdx].id;
+    // Special prefix if coming from CX
+    const sourceIsCx = this.columns[originalArg.colIdx].isCx;
+    
+    let prefix = 'Ref:';
+    if (sourceIsCx) prefix = 'Grant in CX:';
+    else if (isSkip) prefix = `Ref (${sourceName}):`;
+
+    this.arguments.update(args => [...args, {
+      id: crypto.randomUUID(),
+      text: `${prefix} "${originalArg.text.substring(0, 15)}..."`,
+      colIdx: targetIdx,
+      status: 'open',
+      parentId: originalArg.id
+    }]);
+
+    this.activeLinkId.set(null);
+  }
+
+  isLinkedToPrevious(arg: DebateArgument): boolean {
+    if (!arg.parentId) return false;
+    const parent = this.arguments().find(a => a.id === arg.parentId);
+    return parent ? (arg.colIdx === parent.colIdx + 1) : false;
+  }
+
+  addArg(event: any, colIdx: number) {
+    const text = event.target.value.trim();
+    if (!text) return;
+    this.arguments.update(args => [...args, {
+      id: crypto.randomUUID(),
+      text,
+      colIdx,
+      status: 'open',
+      parentId: null
+    }]);
+    event.target.value = '';
+  }
+
+  // ... (Standard helpers remain same)
+  toggleLinkMenu(id: string, e: Event) { e.stopPropagation(); this.activeLinkId.set(this.activeLinkId() === id ? null : id); }
+  closeMenus() { this.activeLinkId.set(null); }
+  deleteArg(arg: DebateArgument) { if (confirm('Delete note?')) this.arguments.update(args => args.filter(a => a.id !== arg.id)); }
+  setDrop(arg: DebateArgument) { this.updateArgStatus(arg.id, 'dropped'); }
+  setAddressed(arg: DebateArgument) { this.updateArgStatus(arg.id, 'addressed'); }
+  updateArgStatus(id: string, status: any) { this.arguments.update(args => args.map(a => a.id === id ? { ...a, status } : a)); }
+  editArg(id: string, e: Event) { e.stopPropagation(); this.editingId.set(id); }
+  stopEditing() { this.editingId.set(null); }
+  resetFlow() { if(confirm('Clear all notes?')) this.arguments.set([]); }
+}
