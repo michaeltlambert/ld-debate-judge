@@ -11,6 +11,7 @@ import { TermComponent } from './term.component';
   template: `
     <div id="debate-ballot" class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
       
+      <!-- Header -->
       <div class="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
         <h2 class="font-bold text-slate-800 text-xl tracking-tight">Official Ballot</h2>
         <button (click)="toggleHints()" 
@@ -20,6 +21,7 @@ import { TermComponent } from './term.component';
         </button>
       </div>
 
+      <!-- Hints (Collapsible) -->
       <div *ngIf="showHints()" class="mb-8 grid grid-cols-1 md:grid-cols-2 gap-3 transition-all">
         <div class="bg-indigo-50 border border-indigo-100 p-3 rounded text-xs text-indigo-900">
           <strong>1. Framework:</strong> Weigh <app-term lookup="Value Premise">Value</app-term> & <app-term lookup="Value Criterion">Criterion</app-term>.
@@ -28,19 +30,22 @@ import { TermComponent } from './term.component';
           <strong>2. Tabula Rasa:</strong> Judge only what is said. No bias.
         </div>
         <div class="bg-rose-50 border border-rose-100 p-3 rounded text-xs text-rose-900">
-          <strong>3. Drops:</strong> <app-term lookup="Dropped"> Dropped</app-term> args are true.
+          <strong>3. Drops:</strong> <app-term lookup="Dropped">Dropped</app-term> args are true.
         </div>
         <div class="bg-emerald-50 border border-emerald-100 p-3 rounded text-xs text-emerald-900">
           <strong>4. Voters:</strong> Focus on final <app-term lookup="Voters">Voting Issues</app-term>.
         </div>
       </div>
 
+      <!-- SCORING SECTION -->
       <div class="space-y-6">
         
+        <!-- Points Inputs -->
         <div class="grid grid-cols-2 gap-6 relative">
           
           <div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-white border border-slate-200 text-slate-400 font-bold text-xs px-2 py-1 rounded-full z-10 shadow-sm">VS</div>
 
+          <!-- AFF INPUT -->
           <div class="bg-slate-50 p-4 rounded-lg border transition-colors"
              [class.border-blue-500]="affPoints() > negPoints()"
              [class.border-slate-100]="affPoints() <= negPoints()">
@@ -56,6 +61,7 @@ import { TermComponent } from './term.component';
             <div *ngIf="affPoints() > negPoints()" class="text-[10px] text-center text-blue-600 font-bold uppercase mt-2 tracking-wider">High Point Winner</div>
           </div>
 
+          <!-- NEG INPUT -->
           <div class="bg-slate-50 p-4 rounded-lg border transition-colors"
              [class.border-red-500]="negPoints() > affPoints()"
              [class.border-slate-100]="negPoints() <= affPoints()">
@@ -72,6 +78,7 @@ import { TermComponent } from './term.component';
           </div>
         </div>
 
+        <!-- Decision Buttons -->
         <div>
           <label class="block text-xs font-bold text-slate-500 uppercase mb-2 flex justify-between">
             <span>Decision</span>
@@ -97,11 +104,13 @@ import { TermComponent } from './term.component';
           </div>
         </div>
 
+        <!-- RFD -->
         <div>
           <label class="block text-xs font-bold text-slate-500 uppercase mb-2">Reason for Decision (RFD)</label>
           <textarea class="w-full h-32 border border-slate-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-blue-500 shadow-sm resize-none" placeholder="I voted for the {{decision() || '...'}} because..."></textarea>
         </div>
         
+        <!-- Submit Button -->
         <div class="pt-4 border-t border-slate-100">
           <button (click)="exportToPdf()" 
             [disabled]="!decision() || affPoints() === negPoints()"
@@ -121,18 +130,22 @@ export class BallotComponent {
   pdfService = inject(PdfService);
   showHints = signal(true);
   
+  // Data
   affPoints = signal(28);
   negPoints = signal(28);
   decision = signal<'Aff' | 'Neg' | null>(null);
 
   toggleHints() { this.showHints.update(v => !v); }
 
-  // 1. Direct DOM Intervention (Prevents 30333)
+  /**
+   * Clamps input to [0-30] and updates signals.
+   * Direct DOM manipulation prevents invalid numbers (e.g. 303) from displaying.
+   */
   checkInput(event: Event, side: 'aff' | 'neg') {
     const input = event.target as HTMLInputElement;
     let val = parseFloat(input.value);
 
-    // If invalid or > 30, strictly overwrite the Input Element value
+    // Hard clamp for visual consistency
     if (val > 30) {
       input.value = '30';
       val = 30;
@@ -141,7 +154,7 @@ export class BallotComponent {
       val = 0;
     }
     
-    // Sync with Signal
+    // Update Signal
     if (side === 'aff') this.setAff(val);
     else this.setNeg(val);
   }
@@ -156,6 +169,7 @@ export class BallotComponent {
     this.autoCalculateWinner(); 
   }
 
+  // Automatically picks the winner based on points, but allows overrides
   autoCalculateWinner() {
     if (this.affPoints() > this.negPoints()) this.decision.set('Aff');
     else if (this.negPoints() > this.affPoints()) this.decision.set('Neg');
@@ -164,6 +178,7 @@ export class BallotComponent {
 
   manualOverride(winner: 'Aff' | 'Neg') { this.decision.set(winner); }
   
+  // Detects if judge is voting against the math
   isLowPointWin(): boolean {
     if (this.decision() === 'Aff' && this.affPoints() < this.negPoints()) return true;
     if (this.decision() === 'Neg' && this.negPoints() < this.affPoints()) return true;

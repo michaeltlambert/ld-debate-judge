@@ -1,3 +1,7 @@
+/**
+ * Single source of truth for definitions.
+ * Keys match the values passed into <app-term lookup="Key">.
+ */
 export const DEBATE_TERMS: Record<string, string> = {
   // Structure
   'Value Premise': 'The core moral goal of the case (e.g., Justice, Liberty, Life). The "Why".',

@@ -9,13 +9,13 @@ export interface DebateArgument {
   colIdx: number;
   status: 'open' | 'addressed' | 'dropped';
   parentId: string | null;
-  isVoter?: boolean; // NEW: Track if this is a voting issue
+  isVoter?: boolean; // Flag for voting issues (Purple Star)
 }
 
 interface ColumnDef {
   id: string;
-  name: string;
-  isCx: boolean;
+  name: string; // The descriptive name (e.g., "1. Affirmative Case")
+  isCx: boolean; // If true, renders a yellow column
 }
 
 interface FrameworkData {
@@ -39,33 +39,41 @@ interface FrameworkData {
         <button (click)="resetFlow()" class="text-xs text-red-400 hover:text-red-600 underline">Clear All</button>
       </div>
       
+      <!-- Horizontal Scroll Container -->
       <div class="flex-1 overflow-x-auto pb-12" (click)="closeMenus()"> 
         <div class="flex h-full min-w-max divide-x divide-slate-200 border border-slate-200 rounded-lg bg-slate-50">
           
+          <!-- Column Loop -->
           <div *ngFor="let col of columns; let i = index" 
                class="flex flex-col group transition-all"
                [ngClass]="col.isCx ? 'w-64 bg-amber-50/50' : 'w-80 bg-slate-50'">
             
+            <!-- Header -->
             <div class="p-3 text-center text-xs font-bold uppercase tracking-wider border-b border-slate-200 sticky top-0 z-20 shadow-sm"
                  [ngClass]="col.isCx ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-600'">
               {{ col.name }}
             </div>
 
+            <!-- Content Area -->
             <div class="flex-1 p-2 space-y-3 overflow-y-auto min-h-[400px]">
               
+              <!-- Framework Box (Only for 1AC & 1NC) -->
               <div *ngIf="['1AC', '1NC'].includes(col.id)" 
                    class="mb-4 p-3 rounded-lg border-2 border-dashed border-indigo-200 bg-indigo-50/50">
                 <div class="text-[10px] font-bold text-indigo-400 uppercase tracking-widest mb-2 text-center">Framework</div>
+                <!-- Value -->
                 <div class="flex items-center gap-2 mb-2">
                   <span class="text-xs font-bold text-indigo-700 w-16 text-right"><app-term lookup="Value Premise">Value</app-term>:</span>
                   <input type="text" [(ngModel)]="frameworks()[col.id].value" (ngModelChange)="saveData()" placeholder="e.g. Justice" class="flex-1 text-sm font-bold text-indigo-900 bg-white border border-indigo-100 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500">
                 </div>
+                <!-- Criterion -->
                 <div class="flex items-center gap-2">
                   <span class="text-xs font-bold text-indigo-700 w-16 text-right"><app-term lookup="Value Criterion">Criterion</app-term>:</span>
                   <input type="text" [(ngModel)]="frameworks()[col.id].criterion" (ngModelChange)="saveData()" placeholder="e.g. Social Welfare" class="flex-1 text-sm font-medium text-indigo-800 bg-white border border-indigo-100 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500">
                 </div>
               </div>
 
+              <!-- Arguments Loop -->
               <div *ngFor="let arg of getArgsForCol(i)" 
                    class="relative p-3 rounded-lg border shadow-sm transition-all group/card"
                    [ngClass]="{
@@ -75,11 +83,14 @@ interface FrameworkData {
                      'bg-white border-slate-200': !arg.isVoter && arg.status === 'open'
                    }">
 
+                <!-- Connection Line to Previous -->
                 <div *ngIf="isLinkedToPrevious(arg)" class="absolute -left-3 top-4 w-3 h-[2px] bg-slate-300"></div>
 
+                <!-- Text Area Display -->
                 <div *ngIf="editingId() !== arg.id" (click)="editArg(arg.id, $event)" class="text-sm text-slate-800 whitespace-pre-wrap cursor-text min-h-[1.5rem]">
                   {{ arg.text }}
                 </div>
+                <!-- Editable Text Area -->
                 <textarea *ngIf="editingId() === arg.id" 
                   [(ngModel)]="arg.text" 
                   (blur)="stopEditing()"
@@ -89,26 +100,21 @@ interface FrameworkData {
                   autoFocus>
                 </textarea>
 
+                <!-- Hover Actions Bar -->
                 <div class="mt-2 flex justify-between items-center opacity-0 group-hover/card:opacity-100 transition-opacity">
                   <div class="flex gap-1 items-center">
                     
                     <button (click)="setDrop(arg); $event.stopPropagation()" title="Drop" class="p-1 hover:text-red-600 text-slate-400"><span class="font-bold text-xs">✕</span></button>
-                    
                     <button (click)="setAddressed(arg); $event.stopPropagation()" title="Address" class="p-1 hover:text-green-600 text-slate-400"><span class="font-bold text-xs">✓</span></button>
-                    
                     <div class="w-px h-3 bg-slate-200 mx-1"></div>
-
+                    <!-- Voter Star -->
                     <button (click)="toggleVoter(arg); $event.stopPropagation()" 
                       [title]="arg.isVoter ? 'Unmark Voter' : 'Mark as Voting Issue'"
                       class="p-1 transition-colors"
                       [class]="arg.isVoter ? 'text-purple-600' : 'text-slate-300 hover:text-purple-500'">
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-4 h-4">
-                        <path fill-rule="evenodd" d="M10.788 3.21c.448-1.077 1.976-1.077 2.424 0l2.082 5.007 5.404.433c1.164.093 1.636 1.545.749 2.305l-4.117 3.527 1.257 5.273c.271 1.136-.964 2.033-1.96 1.425L12 18.354 7.373 21.18c-.996.608-2.231-.29-1.96-1.425l1.257-5.273-4.117-3.527c-.887-.76-.415-2.212.749-2.305l5.404-.433 2.082-5.006z" clip-rule="evenodd" />
-                      </svg>
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-4 h-4"><path fill-rule="evenodd" d="M10.788 3.21c.448-1.077 1.976-1.077 2.424 0l2.082 5.007 5.404.433c1.164.093 1.636 1.545.749 2.305l-4.117 3.527 1.257 5.273c.271 1.136-.964 2.033-1.96 1.425L12 18.354 7.373 21.18c-.996.608-2.231-.29-1.96-1.425l1.257-5.273-4.117-3.527c-.887-.76-.415-2.212.749-2.305l5.404-.433 2.082-5.006z" clip-rule="evenodd" /></svg>
                     </button>
-
                     <div class="w-px h-3 bg-slate-200 mx-1"></div>
-                    
                     <button (click)="deleteArg(arg); $event.stopPropagation()" title="Delete" class="p-1 hover:text-slate-600 text-slate-300">
                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                     </button>
@@ -121,7 +127,7 @@ interface FrameworkData {
                       [ngClass]="col.isCx ? 'bg-amber-100 text-amber-700 border-amber-200 hover:bg-amber-200' : 'bg-blue-50 text-blue-600 border-blue-100 hover:bg-blue-100'">
                       Link ⤵
                     </button>
-                    <div *ngIf="activeLinkId() === arg.id" 
+                     <div *ngIf="activeLinkId() === arg.id" 
                          (click)="$event.stopPropagation()"
                          class="absolute right-0 top-full mt-1 w-36 bg-white rounded shadow-lg border border-slate-200 z-50 flex flex-col py-1">
                       <div class="px-2 py-1 text-[10px] text-slate-400 font-bold uppercase tracking-wider border-b border-slate-100 mb-1">Link to...</div>
@@ -132,13 +138,14 @@ interface FrameworkData {
                   </div>
                 </div>
 
+                <!-- Badges -->
                 <div *ngIf="arg.status === 'dropped' && !arg.isVoter" class="absolute -top-2 -right-2 bg-red-500 text-white text-[10px] px-2 py-0.5 rounded-full font-bold shadow-sm z-10">DROP</div>
                 <div *ngIf="arg.isVoter" class="absolute -top-2 -right-2 bg-purple-600 text-white text-[10px] px-2 py-0.5 rounded-full font-bold shadow-sm z-10 flex items-center gap-1">
                   <span>★</span> VOTER
                 </div>
-
               </div>
 
+              <!-- Quick Add -->
               <div class="mt-2">
                 <input type="text" 
                   [placeholder]="col.isCx ? '+ Note Admission...' : '+ New Point...'" 
@@ -154,7 +161,7 @@ interface FrameworkData {
   `
 })
 export class FlowComponent {
-// UPDATED: Full descriptive names for new judges
+  // Use Descriptive Names for Columns
   columns: ColumnDef[] = [
     { id: '1AC', name: '1. Affirmative Constructive', isCx: false },
     { id: 'CX1', name: 'Cross-Ex (Neg Questions)', isCx: true },
@@ -176,18 +183,21 @@ export class FlowComponent {
 
   constructor() {
     this.loadData();
+    // Persistence Effect
     effect(() => {
       localStorage.setItem('ld-flow-args', JSON.stringify(this.arguments()));
       localStorage.setItem('ld-flow-frameworks', JSON.stringify(this.frameworks()));
     });
   }
 
+  // --- DATA LOADING ---
   loadData() {
     try {
       const savedArgs = localStorage.getItem('ld-flow-args');
       const savedFrames = localStorage.getItem('ld-flow-frameworks');
       if (savedArgs) {
         let parsed = JSON.parse(savedArgs);
+        // Sanity check for data integrity
         if (parsed.length > 0 && parsed[0].colIdx === undefined) parsed = []; 
         this.arguments.set(parsed);
       }
@@ -201,21 +211,18 @@ export class FlowComponent {
     localStorage.setItem('ld-flow-frameworks', JSON.stringify(this.frameworks()));
   }
 
-  // --- NEW: Toggle Voter Status ---
+  // --- ARGUMENT ACTIONS ---
+
   toggleVoter(arg: DebateArgument) {
     this.arguments.update(args => 
       args.map(a => a.id === arg.id ? { ...a, isVoter: !a.isVoter } : a)
     );
   }
 
-  // --- Standard Helpers ---
-  getArgsForCol(idx: number) { return this.arguments().filter(a => a.colIdx === idx); }
-  getFutureColumns(currentIdx: number) { return this.columns.map((col, idx) => ({ name: col.id, isCx: col.isCx, idx })).filter(c => c.idx > currentIdx); }
-
   createLink(originalArg: DebateArgument, targetIdx: number) {
     this.updateArgStatus(originalArg.id, 'addressed');
     const isSkip = targetIdx > originalArg.colIdx + 1;
-    const sourceName = this.columns[originalArg.colIdx].id;
+    const sourceName = this.columns[originalArg.colIdx].id; // Use short code for ref
     const sourceIsCx = this.columns[originalArg.colIdx].isCx;
     let prefix = 'Ref:';
     if (sourceIsCx) prefix = 'Grant in CX:';
@@ -227,15 +234,9 @@ export class FlowComponent {
       colIdx: targetIdx,
       status: 'open',
       parentId: originalArg.id,
-      isVoter: false // Default to false
+      isVoter: false
     }]);
     this.activeLinkId.set(null);
-  }
-
-  isLinkedToPrevious(arg: DebateArgument): boolean {
-    if (!arg.parentId) return false;
-    const parent = this.arguments().find(a => a.id === arg.parentId);
-    return parent ? (arg.colIdx === parent.colIdx + 1) : false;
   }
 
   addArg(event: any, colIdx: number) {
@@ -252,6 +253,14 @@ export class FlowComponent {
     event.target.value = '';
   }
 
+  // --- HELPERS ---
+  getArgsForCol(idx: number) { return this.arguments().filter(a => a.colIdx === idx); }
+  getFutureColumns(currentIdx: number) { return this.columns.map((col, idx) => ({ name: col.id, isCx: col.isCx, idx })).filter(c => c.idx > currentIdx); }
+  isLinkedToPrevious(arg: DebateArgument): boolean {
+    if (!arg.parentId) return false;
+    const parent = this.arguments().find(a => a.id === arg.parentId);
+    return parent ? (arg.colIdx === parent.colIdx + 1) : false;
+  }
   toggleLinkMenu(id: string, e: Event) { e.stopPropagation(); this.activeLinkId.set(this.activeLinkId() === id ? null : id); }
   closeMenus() { this.activeLinkId.set(null); }
   deleteArg(arg: DebateArgument) { if (confirm('Delete note?')) this.arguments.update(args => args.filter(a => a.id !== arg.id)); }

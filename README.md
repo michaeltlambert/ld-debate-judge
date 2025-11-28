@@ -1,59 +1,80 @@
-# LdDebateJudge
+DebateMate: Lincoln-Douglas Adjudication System
 
-This project was generated using [Angular CLI](https://github.com/angular/angular-cli) version 21.0.0.
+📘 Project Overview
 
-## Development server
+DebateMate is a single-page Angular application designed to help judges score Lincoln-Douglas (LD) debates. It combines a high-precision timer, a complex "flowing" (note-taking) system, and an automated ballot that exports to PDF.
 
-To start a local development server, run:
+Tech Stack
 
-```bash
-ng serve
-```
+Framework: Angular v21 (Standalone Components)
 
-Once the server is running, open your browser and navigate to `http://localhost:4200/`. The application will automatically reload whenever you modify any of the source files.
+State Management: Angular Signals (No NgRx or RxJS subscriptions needed)
 
-## Code scaffolding
+Styling: Tailwind CSS v4 (Using the new OKLCH color space)
 
-Angular CLI includes powerful code scaffolding tools. To generate a new component, run:
+Export Engine: html-to-image + jspdf
 
-```bash
-ng generate component component-name
-```
+🏗 Architectural Breakdown
 
-For a complete list of available schematics (such as `components`, `directives`, or `pipes`), run:
+1. State Management (The "Heartbeat")
 
-```bash
-ng generate --help
-```
+We use Angular Signals for reactive state. This is a departure from older Angular (RxJS/Observables).
 
-## Building
+Source of Truth: Data lives in Services (debate.service.ts, tooltip.service.ts).
 
-To build the project run:
+Reactivity: Components inject these services and read signals (e.g., debate.timer()). When a signal updates, the UI updates automatically with fine-grained reactivity.
 
-```bash
-ng build
-```
+Persistence: We use effect() in flow.component.ts. This acts like a "side effect" watcher—whenever the arguments signal changes, it automatically saves to localStorage.
 
-This will compile your project and store the build artifacts in the `dist/` directory. By default, the production build optimizes your application for performance and speed.
+2. The "Portal" Pattern (Tooltips)
 
-## Running unit tests
+Problem: Displaying a tooltip inside a scrolling element (overflow: auto) often causes the tooltip to be clipped or hidden.
+Solution:
 
-To execute unit tests with the [Karma](https://karma-runner.github.io) test runner, use the following command:
+Trigger: TermComponent (the word) detects the mouse hover and calculates screen coordinates (getBoundingClientRect).
 
-```bash
-ng test
-```
+Service: TooltipService receives these coordinates.
 
-## Running end-to-end tests
+Display: GlobalTooltipComponent sits at the very root of AppComponent. It reads the coordinates from the service and renders the tooltip "floating" above the entire app. This bypasses all CSS stacking contexts.
 
-For end-to-end (e2e) testing, run:
+3. PDF Export Strategy
 
-```bash
-ng e2e
-```
+We use html-to-image instead of html2canvas.
 
-Angular CLI does not come with an end-to-end testing framework by default. You can choose one that suits your needs.
+Why? Tailwind v4 uses modern CSS features (like oklch colors) that older libraries cannot parse. html-to-image serializes the DOM more accurately.
 
-## Additional Resources
+The Trick: Before taking the snapshot, we temporarily set overflow: visible on the flow sheet. This forces the browser to render the entire list of arguments (even the ones scrolled out of view) so they appear in the PDF.
 
-For more information on using the Angular CLI, including detailed command references, visit the [Angular CLI Overview and Command Reference](https://angular.dev/tools/cli) page.
+📂 Folder Structure
+
+src/app/
+├── services/
+│   ├── debate.service.ts       # Manages the 3 clocks (Speech, Aff Prep, Neg Prep)
+│   ├── pdf.service.ts          # Handles DOM-to-Image conversion and PDF generation
+│   └── tooltip.service.ts      # Global coordinate system for the floating definitions
+├── components/
+│   ├── timer.component.ts      # The sticky header with clocks
+│   ├── flow.component.ts       # The complex grid for note-taking (Drag/Drop logic logic)
+│   ├── ballot.component.ts     # Scoring form with validation (30pt max)
+│   ├── term.component.ts       # The text trigger (underline)
+│   └── global-tooltip.ts       # The actual popup box
+├── data/
+│   └── glossary.data.ts        # Static dictionary of debate terms
+└── main.ts                     # Bootstraps the application
+
+
+🚀 How to Run
+
+Install: npm install
+
+Run: npm start
+
+Build: npm run build
+
+👨‍💻 For Junior Developers: Tasks to Try
+
+Add a "Reset Round" button: Clear localStorage and reset all timers in DebateService.
+
+Theme Switcher: Use Tailwind's dark: modifier to add a Dark Mode.
+
+Undo/Redo: Implement a history stack in FlowComponent to undo deleted arguments.
