@@ -12,32 +12,6 @@ DebateMate is a real-time Lincoln-Douglas adjudication system. It features a tri
 * **Styling:** Tailwind CSS v4
 * **Export:** PDF Generation (`html-to-image`)
 
----
-
-## 🏗 Data Architecture (Firestore)
-
-### **Collections**
-All data is stored under strict paths for security: `/artifacts/{appId}/public/data/{collection}`.
-
-1.  **`judges`** & **`debaters`** (Profiles)
-    * `id`: UID
-    * `name`: Display Name
-    * `isOnline`: Boolean status
-
-2.  **`debates`**
-    * `topic`: "Resolved: ..."
-    * `affId` / `negId`: UIDs of the debaters
-    * `affName` / `negName`: Cached names for display
-    * `judgeIds`: Array of judge UIDs
-    * `status`: 'Open' | 'Closed'
-
-3.  **`results`** (Submitted Ballots)
-    * `debateId`: Link to Debate
-    * `judgeId`: Link to Judge
-    * `decision`: 'Aff' | 'Neg' (Used to calculate W/L)
-
----
-
 ## 🚀 Getting Started
 1.  **Install:** `npm install`
 2.  **Run:** `npm start`

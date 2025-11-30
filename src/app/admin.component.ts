@@ -146,7 +146,6 @@ export class AdminComponent {
   selectedNegId = '';
 
   create() { 
-    // Find names from the IDs
     const aff = this.tournament.debaters().find(d => d.id === this.selectedAffId);
     const neg = this.tournament.debaters().find(d => d.id === this.selectedNegId);
     

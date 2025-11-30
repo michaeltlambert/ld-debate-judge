@@ -39,32 +39,6 @@ DebateMate is a real-time Lincoln-Douglas adjudication system. It features a tri
 * **Styling:** Tailwind CSS v4
 * **Export:** PDF Generation (\`html-to-image\`)
 
----
-
-## 🏗 Data Architecture (Firestore)
-
-### **Collections**
-All data is stored under strict paths for security: \`/artifacts/{appId}/public/data/{collection}\`.
-
-1.  **\`judges\`** & **\`debaters\`** (Profiles)
-    * \`id\`: UID
-    * \`name\`: Display Name
-    * \`isOnline\`: Boolean status
-
-2.  **\`debates\`**
-    * \`topic\`: "Resolved: ..."
-    * \`affId\` / \`negId\`: UIDs of the debaters
-    * \`affName\` / \`negName\`: Cached names for display
-    * \`judgeIds\`: Array of judge UIDs
-    * \`status\`: 'Open' | 'Closed'
-
-3.  **\`results\`** (Submitted Ballots)
-    * \`debateId\`: Link to Debate
-    * \`judgeId\`: Link to Judge
-    * \`decision\`: 'Aff' | 'Neg' (Used to calculate W/L)
-
----
-
 ## 🚀 Getting Started
 1.  **Install:** \`npm install\`
 2.  **Run:** \`npm start\`
@@ -154,6 +128,9 @@ export interface DebaterStats {
 export class TournamentService {
   user = signal<User | null>(null);
   userProfile = signal<UserProfile | null>(null);
+  
+  // FIX: Explicitly added userRole signal
+  userRole = signal<'Admin' | 'Judge' | 'Debater'>('Debater');
   
   // Collections
   judges = signal<UserProfile[]>([]);
@@ -250,6 +227,7 @@ export class TournamentService {
     const savedRole = localStorage.getItem('debate-user-role') as any;
 
     if (savedName && savedRole) {
+      this.userRole.set(savedRole); // Update role signal
       this.userProfile.set({ id: uid, name: savedName, role: savedRole, isOnline: true });
     }
   }
@@ -257,35 +235,37 @@ export class TournamentService {
   private startListeners() {
     if (!this.db) return;
     
-    // Listen to Judges
-    onSnapshot(this.getCollection('judges'), (snap) => {
+    const judgesRef = this.getCollection('judges');
+    onSnapshot(judgesRef, (snap) => {
       this.judges.set(snap.docs.map(d => ({ id: d.id, ...d.data() } as UserProfile)));
     });
 
-    // Listen to Debaters
-    onSnapshot(this.getCollection('debaters'), (snap) => {
+    const debatersRef = this.getCollection('debaters');
+    onSnapshot(debatersRef, (snap) => {
       this.debaters.set(snap.docs.map(d => ({ id: d.id, ...d.data() } as UserProfile)));
     });
 
-    // Listen to Debates
-    onSnapshot(this.getCollection('debates'), (snap) => {
+    const debatesRef = this.getCollection('debates');
+    onSnapshot(debatesRef, (snap) => {
       this.debates.set(snap.docs.map(d => ({ id: d.id, ...d.data() } as Debate)));
     });
 
-    // Listen to Results
-    onSnapshot(this.getCollection('results'), (snap) => {
+    const resultsRef = this.getCollection('results');
+    onSnapshot(resultsRef, (snap) => {
       this.results.set(snap.docs.map(d => ({ id: d.id, ...d.data() } as RoundResult)));
     });
   }
   
   async setProfile(name: string, role: 'Admin' | 'Judge' | 'Debater') {
     const uid = this.user()?.uid || 'demo-' + Math.random();
+    
+    this.userRole.set(role); // Update role signal
+    
     const profile: UserProfile = { id: uid, name, role, isOnline: true };
 
     localStorage.setItem('debate-user-name', name);
     localStorage.setItem('debate-user-role', role);
     
-    // Save to public directories for Admin visibility
     if (this.db && this.user()) {
       try {
         const collectionName = role === 'Debater' ? 'debaters' : (role === 'Judge' ? 'judges' : null);
@@ -313,7 +293,8 @@ export class TournamentService {
         this.debates.update(d => [...d, { id: 'loc-'+Date.now(), topic, affId, affName, negId, negName, judgeIds:[], status:'Open' }]);
         return;
     }
-    await addDoc(this.getCollection('debates'), { topic, affId, affName, negId, negName, judgeIds: [], status: 'Open' });
+    const ref = this.getCollection('debates');
+    await addDoc(ref, { topic, affId, affName, negId, negName, judgeIds: [], status: 'Open' });
   }
 
   async assignJudge(debateId: string, judgeId: string) {
@@ -349,11 +330,10 @@ export class TournamentService {
     return collection(this.db, 'artifacts', this.appId, 'public', 'data', name);
   }
 
-  // --- HELPERS ---
   getMyAssignments() {
     const uid = this.userProfile()?.id;
     if (!uid) return [];
-    if (!this.db) return this.debates(); // Demo mode shows all
+    if (!this.db) return this.debates(); 
     return this.debates().filter(d => {
       const isAssigned = d.judgeIds.includes(uid) && d.status === 'Open';
       const alreadyVoted = this.results().some(r => r.debateId === d.id && r.judgeId === uid);
@@ -572,7 +552,6 @@ export class AdminComponent {
   selectedNegId = '';
 
   create() { 
-    // Find names from the IDs
     const aff = this.tournament.debaters().find(d => d.id === this.selectedAffId);
     const neg = this.tournament.debaters().find(d => d.id === this.selectedNegId);
     
@@ -590,144 +569,113 @@ export class AdminComponent {
 }`
   },
   {
-    path: 'src/app/tooltip.service.ts',
-    content: `import { Injectable, signal } from '@angular/core';
-import { DEBATE_TERMS } from './glossary.data';
+    path: 'src/app/global-tooltip.component.ts',
+    content: `import { Component, inject } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { TooltipService } from './tooltip.service';
 
-@Injectable({ providedIn: 'root' })
-export class TooltipService {
-  text = signal<string>('');
-  isVisible = signal<boolean>(false);
-  coords = signal<{ x: number, y: number }>({ x: 0, y: 0 });
-
-  show(lookupKey: string, rect: DOMRect) {
-    const definition = DEBATE_TERMS[lookupKey] || DEBATE_TERMS[lookupKey.trim()] || 'Definition not found.';
-    this.text.set(definition);
-    this.coords.set({
-      x: rect.left + (rect.width / 2),
-      y: rect.bottom + 8 
-    });
-    this.isVisible.set(true);
-  }
-
-  hide() {
-    this.isVisible.set(false);
-  }
+@Component({
+  selector: 'app-global-tooltip',
+  standalone: true,
+  imports: [CommonModule],
+  template: \`
+    <div *ngIf="svc.isVisible()"
+         class="fixed z-[9999] pointer-events-none transition-opacity duration-200"
+         [style.top.px]="svc.coords().y"
+         [style.left.px]="svc.coords().x"
+         style="transform: translateX(-50%);">
+      <div class="bg-slate-900 text-white text-xs p-3 rounded-lg shadow-2xl border border-slate-700 w-48 relative animate-in fade-in zoom-in-95 duration-100">
+        <div class="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-slate-900 rotate-45 border-t border-l border-slate-700"></div>
+        <span class="font-bold block mb-1 text-slate-300 uppercase text-[10px] tracking-wider">Definition</span>
+        <p class="leading-relaxed">{{ svc.text() }}</p>
+      </div>
+    </div>
+  \`
+})
+export class GlobalTooltipComponent {
+  svc = inject(TooltipService);
 }`
   },
   {
-    path: 'src/app/pdf.service.ts',
-    content: `import { Injectable } from '@angular/core';
-import jsPDF from 'jspdf';
-import { toPng } from 'html-to-image';
+    path: 'src/app/term.component.ts',
+    content: `import { Component, Input, ElementRef, ViewChild, inject, HostListener } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { TooltipService } from './tooltip.service';
 
-@Injectable({ providedIn: 'root' })
-export class PdfService {
-  async generateBallotPdf(flowElementId: string, ballotElementId: string) {
-    try {
-      const pdf = new jsPDF('p', 'mm', 'a4');
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const options = { backgroundColor: '#ffffff', pixelRatio: 2 };
-
-      const ballotEl = document.getElementById(ballotElementId);
-      if (!ballotEl) throw new Error(\`Element #\${ballotElementId} not found\`);
-
-      const ballotImgData = await toPng(ballotEl, options);
-      const ballotProps = pdf.getImageProperties(ballotImgData);
-      const ballotImgHeight = (ballotProps.height * pdfWidth) / ballotProps.width;
-
-      pdf.setFontSize(18);
-      pdf.text('Official Debate Ballot', 10, 15);
-      pdf.addImage(ballotImgData, 'PNG', 0, 25, pdfWidth, ballotImgHeight);
-
-      pdf.addPage();
-      const flowEl = document.getElementById(flowElementId);
-      if (!flowEl) throw new Error(\`Element #\${flowElementId} not found\`);
-
-      const originalOverflow = flowEl.style.overflow;
-      flowEl.style.overflow = 'visible'; 
-
-      const flowImgData = await toPng(flowEl, options);
-      flowEl.style.overflow = originalOverflow;
-
-      const flowProps = pdf.getImageProperties(flowImgData);
-      const flowImgHeight = (flowProps.height * pdfWidth) / flowProps.width;
-
-      pdf.text('Debate Flow / Notes', 10, 15);
-      pdf.addImage(flowImgData, 'PNG', 0, 25, pdfWidth, flowImgHeight);
-
-      pdf.save(\`Debate_Ballot_\${new Date().toISOString().slice(0,10)}.pdf\`);
-    } catch (err) {
-      console.error('Export Failed:', err);
-      alert('Could not generate PDF. Please try again.\\nError: ' + err);
-    }
-  }
+@Component({
+  selector: 'app-term',
+  standalone: true,
+  imports: [CommonModule],
+  template: \`
+    <span #trigger (mouseenter)="onEnter()" (mouseleave)="onLeave()"
+          class="cursor-help underline decoration-dotted decoration-slate-400 underline-offset-4 decoration-2 hover:text-blue-600 hover:decoration-blue-400 transition-colors">
+      <ng-content></ng-content>
+    </span>
+  \`
+})
+export class TermComponent {
+  @Input() lookup: string = ''; 
+  @ViewChild('trigger') trigger!: ElementRef;
+  tooltipService = inject(TooltipService);
+  onEnter() { const rect = this.trigger.nativeElement.getBoundingClientRect(); this.tooltipService.show(this.lookup, rect); }
+  onLeave() { this.tooltipService.hide(); }
+  @HostListener('window:scroll') onScroll() { this.tooltipService.hide(); }
 }`
   },
   {
-    path: 'src/app/debate.service.ts',
-    content: `import { Injectable, signal } from '@angular/core';
+    path: 'src/app/timer.component.ts',
+    content: `import { Component, inject } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { DebateService } from './debate.service';
+import { TermComponent } from './term.component';
 
-export interface Phase {
-  id: string; name: string; time: number; hint: string;
-}
-
-export type TimerType = 'SPEECH' | 'AFF_PREP' | 'NEG_PREP' | 'IDLE';
-
-@Injectable({ providedIn: 'root' })
-export class DebateService {
-  readonly PREP_ALLOWANCE = 240; 
-  readonly phases: Phase[] = [
-    { id: '1AC', name: 'Affirmative Constructive', time: 360, hint: 'Aff presents Value, Criterion, and Contentions.' },
-    { id: 'CX1', name: 'Cross-Ex (Neg Questions)', time: 180, hint: 'Neg clarifies arguments. No new arguments.' },
-    { id: '1NC', name: 'Negative Constructive', time: 420, hint: 'Neg presents case and attacks Aff.' },
-    { id: 'CX2', name: 'Cross-Ex (Aff Questions)', time: 180, hint: 'Aff questions Neg. Look for contradictions.' },
-    { id: '1AR', name: '1st Aff Rebuttal', time: 240, hint: 'Aff must answer ALL Neg attacks here.' },
-    { id: '2NR', name: 'Negative Rebuttal', time: 360, hint: 'Neg closing speech. Crystallize voting issues.' },
-    { id: '2AR', name: '2nd Aff Rebuttal', time: 180, hint: 'Aff closing speech. Explain why Aff wins.' },
-  ];
-
-  currentPhase = signal<Phase>(this.phases[0]);
-  speechTimer = signal<number>(360);
-  affPrep = signal<number>(this.PREP_ALLOWANCE);
-  negPrep = signal<number>(this.PREP_ALLOWANCE);
-  activeTimer = signal<TimerType>('IDLE');
-  private intervalId: any;
-
-  constructor() {
-    this.intervalId = setInterval(() => { this.tick(); }, 1000);
-  }
-
-  private tick() {
-    const type = this.activeTimer();
-    if (type === 'SPEECH') {
-      if (this.speechTimer() > 0) this.speechTimer.update(t => t - 1);
-      else this.stop();
-    } else if (type === 'AFF_PREP') {
-      if (this.affPrep() > 0) this.affPrep.update(t => t - 1);
-      else this.stop();
-    } else if (type === 'NEG_PREP') {
-      if (this.negPrep() > 0) this.negPrep.update(t => t - 1);
-      else this.stop();
-    }
-  }
-
-  toggleSpeech() { this.activeTimer() === 'SPEECH' ? this.stop() : this.activeTimer.set('SPEECH'); }
-  toggleAffPrep() { this.activeTimer() === 'AFF_PREP' ? this.stop() : this.activeTimer.set('AFF_PREP'); }
-  toggleNegPrep() { this.activeTimer() === 'NEG_PREP' ? this.stop() : this.activeTimer.set('NEG_PREP'); }
-  stop() { this.activeTimer.set('IDLE'); }
-  
-  setPhase(phase: Phase) {
-    this.stop();
-    this.currentPhase.set(phase);
-    this.speechTimer.set(phase.time);
-  }
-
-  formatTime(seconds: number): string {
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return \`\${m}:\${s < 10 ? '0' : ''}\${s}\`;
-  }
+@Component({
+  selector: 'app-timer',
+  standalone: true,
+  imports: [CommonModule, TermComponent],
+  template: \`
+    <div class="bg-white border-b border-slate-200 shadow-sm sticky top-0 z-50">
+      <div class="max-w-[1920px] mx-auto px-4 py-2">
+        <div class="flex items-center justify-between gap-4">
+          <div class="flex items-center gap-3 bg-blue-50 px-3 py-1 rounded-lg border border-blue-100 min-w-[140px]">
+            <div class="flex flex-col">
+              <span class="text-[10px] font-bold text-blue-600 uppercase tracking-wide"><app-term lookup="Prep Time">Aff Prep</app-term></span>
+              <span class="font-mono text-xl font-bold text-slate-700 leading-none">{{ debate.formatTime(debate.affPrep()) }}</span>
+            </div>
+            <button (click)="debate.toggleAffPrep()" class="ml-auto text-blue-600 hover:bg-blue-100 p-1 rounded-full">
+               <svg *ngIf="debate.activeTimer() !== 'AFF_PREP'" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-6 h-6"><path fill-rule="evenodd" d="M4.5 5.653c0-1.426 1.529-2.33 2.779-1.643l11.54 6.348c1.295.712 1.295 2.573 0 3.285L7.28 19.991c-1.25.687-2.779-.217-2.779-1.643V5.653z" clip-rule="evenodd" /></svg>
+               <svg *ngIf="debate.activeTimer() === 'AFF_PREP'" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-6 h-6"><path fill-rule="evenodd" d="M6.75 5.25a.75.75 0 01.75-.75H9a.75.75 0 01.75.75v13.5a.75.75 0 01-.75.75H7.5a.75.75 0 01-.75-.75V5.25zm7.5 0A.75.75 0 0115 4.5h1.5a.75.75 0 01.75.75v13.5a.75.75 0 01-.75.75H15a.75.75 0 01-.75-.75V5.25z" clip-rule="evenodd" /></svg>
+            </button>
+          </div>
+          <div class="flex-1 flex items-center justify-center gap-6">
+            <div class="bg-slate-900 text-white px-6 py-1 rounded-lg flex items-center gap-4 shadow-md min-w-[200px] justify-center">
+              <span class="font-mono text-4xl font-bold tracking-tighter" [class.text-emerald-400]="debate.activeTimer() === 'SPEECH'">{{ debate.formatTime(debate.speechTimer()) }}</span>
+              <button (click)="debate.toggleSpeech()" class="hover:text-emerald-400 transition-colors">
+                <svg *ngIf="debate.activeTimer() !== 'SPEECH'" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-8 h-8"><path fill-rule="evenodd" d="M2.25 12c0-5.385 4.365-9.75 9.75-9.75s9.75 4.365 9.75 9.75-4.365 9.75-9.75 9.75S2.25 17.385 2.25 12zm14.024-.983a1.125 1.125 0 010 1.966l-5.603 3.113A1.125 1.125 0 019 15.113V8.887c0-.857.921-1.4 1.671-.983l5.603 3.113z" clip-rule="evenodd" /></svg>
+                <svg *ngIf="debate.activeTimer() === 'SPEECH'" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-8 h-8"><path fill-rule="evenodd" d="M2.25 12c0-5.385 4.365-9.75 9.75-9.75s9.75 4.365 9.75 9.75-4.365 9.75-9.75 9.75S2.25 17.385 2.25 12zM9 8.25a.75.75 0 00-.75.75v6c0 .414.336.75.75.75h.75a.75.75 0 00.75-.75V9a.75.75 0 00-.75-.75H9zm5.25 0a.75.75 0 00-.75.75v6c0 .414.336.75.75.75H15a.75.75 0 00.75-.75V9a.75.75 0 00-.75-.75h-.75z" clip-rule="evenodd" /></svg>
+              </button>
+            </div>
+          </div>
+          <div class="flex items-center gap-3 bg-red-50 px-3 py-1 rounded-lg border border-red-100 min-w-[140px]">
+            <button (click)="debate.toggleNegPrep()" class="text-red-600 hover:bg-red-100 p-1 rounded-full">
+              <svg *ngIf="debate.activeTimer() !== 'NEG_PREP'" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-6 h-6"><path fill-rule="evenodd" d="M4.5 5.653c0-1.426 1.529-2.33 2.779-1.643l11.54 6.348c1.295.712 1.295 2.573 0 3.285L7.28 19.991c-1.25.687-2.779-.217-2.779-1.643V5.653z" clip-rule="evenodd" /></svg>
+              <svg *ngIf="debate.activeTimer() === 'NEG_PREP'" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-6 h-6"><path fill-rule="evenodd" d="M6.75 5.25a.75.75 0 01.75-.75H9a.75.75 0 01.75.75v13.5a.75.75 0 01-.75.75H7.5a.75.75 0 01-.75-.75V5.25zm7.5 0A.75.75 0 0115 4.5h1.5a.75.75 0 01.75.75v13.5a.75.75 0 01-.75.75H15a.75.75 0 01-.75-.75V5.25z" clip-rule="evenodd" /></svg>
+            </button>
+            <div class="flex flex-col items-end">
+              <span class="text-[10px] font-bold text-red-600 uppercase tracking-wide"><app-term lookup="Prep Time">Neg Prep</app-term></span>
+              <span class="font-mono text-xl font-bold text-slate-700 leading-none">{{ debate.formatTime(debate.negPrep()) }}</span>
+            </div>
+          </div>
+        </div>
+        <div class="flex justify-center gap-1 mt-2 overflow-x-auto pb-1">
+           <button *ngFor="let p of debate.phases" (click)="debate.setPhase(p)" class="text-[10px] font-bold px-3 py-1 rounded-full border transition-all whitespace-nowrap" [class]="debate.currentPhase().id === p.id ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'">{{ p.id }}</button>
+        </div>
+      </div>
+    </div>
+  \`
+})
+export class TimerComponent {
+  debate = inject(DebateService);
 }`
   },
   {
@@ -1048,7 +996,7 @@ import { TournamentService } from './tournament.service';
       <div *ngIf="isDebater()" class="p-8 max-w-4xl mx-auto">
         <div class="bg-white p-8 rounded-2xl shadow-sm border border-slate-200 text-center">
           <div class="w-20 h-20 bg-purple-100 text-purple-600 rounded-full flex items-center justify-center text-3xl font-bold mx-auto mb-4">
-            {{ tournament.userProfile()?.name.charAt(0) }}
+            {{ tournament.userProfile()?.name?.charAt(0) }}
           </div>
           <h2 class="text-2xl font-bold text-slate-800">Welcome, {{ tournament.userProfile()?.name }}</h2>
           <p class="text-slate-500 mb-6">You are registered as a Debater.</p>

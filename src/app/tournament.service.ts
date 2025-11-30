@@ -51,6 +51,9 @@ export class TournamentService {
   user = signal<User | null>(null);
   userProfile = signal<UserProfile | null>(null);
   
+  // FIX: Explicitly added userRole signal
+  userRole = signal<'Admin' | 'Judge' | 'Debater'>('Debater');
+  
   // Collections
   judges = signal<UserProfile[]>([]);
   debaters = signal<UserProfile[]>([]);
@@ -146,6 +149,7 @@ export class TournamentService {
     const savedRole = localStorage.getItem('debate-user-role') as any;
 
     if (savedName && savedRole) {
+      this.userRole.set(savedRole); // Update role signal
       this.userProfile.set({ id: uid, name: savedName, role: savedRole, isOnline: true });
     }
   }
@@ -153,35 +157,37 @@ export class TournamentService {
   private startListeners() {
     if (!this.db) return;
     
-    // Listen to Judges
-    onSnapshot(this.getCollection('judges'), (snap) => {
+    const judgesRef = this.getCollection('judges');
+    onSnapshot(judgesRef, (snap) => {
       this.judges.set(snap.docs.map(d => ({ id: d.id, ...d.data() } as UserProfile)));
     });
 
-    // Listen to Debaters
-    onSnapshot(this.getCollection('debaters'), (snap) => {
+    const debatersRef = this.getCollection('debaters');
+    onSnapshot(debatersRef, (snap) => {
       this.debaters.set(snap.docs.map(d => ({ id: d.id, ...d.data() } as UserProfile)));
     });
 
-    // Listen to Debates
-    onSnapshot(this.getCollection('debates'), (snap) => {
+    const debatesRef = this.getCollection('debates');
+    onSnapshot(debatesRef, (snap) => {
       this.debates.set(snap.docs.map(d => ({ id: d.id, ...d.data() } as Debate)));
     });
 
-    // Listen to Results
-    onSnapshot(this.getCollection('results'), (snap) => {
+    const resultsRef = this.getCollection('results');
+    onSnapshot(resultsRef, (snap) => {
       this.results.set(snap.docs.map(d => ({ id: d.id, ...d.data() } as RoundResult)));
     });
   }
   
   async setProfile(name: string, role: 'Admin' | 'Judge' | 'Debater') {
     const uid = this.user()?.uid || 'demo-' + Math.random();
+    
+    this.userRole.set(role); // Update role signal
+    
     const profile: UserProfile = { id: uid, name, role, isOnline: true };
 
     localStorage.setItem('debate-user-name', name);
     localStorage.setItem('debate-user-role', role);
     
-    // Save to public directories for Admin visibility
     if (this.db && this.user()) {
       try {
         const collectionName = role === 'Debater' ? 'debaters' : (role === 'Judge' ? 'judges' : null);
@@ -209,7 +215,8 @@ export class TournamentService {
         this.debates.update(d => [...d, { id: 'loc-'+Date.now(), topic, affId, affName, negId, negName, judgeIds:[], status:'Open' }]);
         return;
     }
-    await addDoc(this.getCollection('debates'), { topic, affId, affName, negId, negName, judgeIds: [], status: 'Open' });
+    const ref = this.getCollection('debates');
+    await addDoc(ref, { topic, affId, affName, negId, negName, judgeIds: [], status: 'Open' });
   }
 
   async assignJudge(debateId: string, judgeId: string) {
@@ -245,11 +252,10 @@ export class TournamentService {
     return collection(this.db, 'artifacts', this.appId, 'public', 'data', name);
   }
 
-  // --- HELPERS ---
   getMyAssignments() {
     const uid = this.userProfile()?.id;
     if (!uid) return [];
-    if (!this.db) return this.debates(); // Demo mode shows all
+    if (!this.db) return this.debates(); 
     return this.debates().filter(d => {
       const isAssigned = d.judgeIds.includes(uid) && d.status === 'Open';
       const alreadyVoted = this.results().some(r => r.debateId === d.id && r.judgeId === uid);

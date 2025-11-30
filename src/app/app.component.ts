@@ -43,7 +43,7 @@ import { TournamentService } from './tournament.service';
       <div *ngIf="isDebater()" class="p-8 max-w-4xl mx-auto">
         <div class="bg-white p-8 rounded-2xl shadow-sm border border-slate-200 text-center">
           <div class="w-20 h-20 bg-purple-100 text-purple-600 rounded-full flex items-center justify-center text-3xl font-bold mx-auto mb-4">
-            {{ tournament.userProfile()?.name.charAt(0) }}
+            {{ tournament.userProfile()?.name?.charAt(0) }}
           </div>
           <h2 class="text-2xl font-bold text-slate-800">Welcome, {{ tournament.userProfile()?.name }}</h2>
           <p class="text-slate-500 mb-6">You are registered as a Debater.</p>
