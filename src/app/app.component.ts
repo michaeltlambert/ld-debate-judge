@@ -1,103 +1,117 @@
-import { Component, signal, inject } from '@angular/core';
+import { Component, signal, inject, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { TimerComponent } from './timer.component';
 import { FlowComponent } from './flow.component';
 import { BallotComponent } from './ballot.component';
 import { GlobalTooltipComponent } from './global-tooltip.component';
+import { LoginComponent } from './login.component';
+import { AdminComponent } from './admin.component';
 import { TournamentService } from './tournament.service';
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [CommonModule, TimerComponent, FlowComponent, BallotComponent, GlobalTooltipComponent],
+  imports: [CommonModule, TimerComponent, FlowComponent, BallotComponent, GlobalTooltipComponent, LoginComponent, AdminComponent],
   template: `
-    <div class="min-h-screen bg-slate-50 flex flex-col h-screen overflow-hidden">
+    <app-login *ngIf="!tournament.userProfile()" />
+    <div *ngIf="tournament.userProfile()" class="min-h-screen bg-slate-50">
       
-      <!-- 1. Sticky Header Timer -->
-      <app-timer class="flex-none" />
+      <!-- HEADER with Logout -->
+      <header *ngIf="!isAdmin()" class="bg-white border-b border-slate-200 px-6 py-3 flex justify-between items-center sticky top-0 z-50">
+        <div class="flex items-center gap-2">
+          <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold">DM</div>
+          <div>
+            <h1 class="text-sm font-bold text-slate-800 leading-tight">DebateMate</h1>
+            <p class="text-[10px] text-slate-500 uppercase tracking-wide font-bold">{{ tournament.userProfile()?.role }} Mode</p>
+          </div>
+        </div>
+        <div class="flex items-center gap-4">
+          <div class="text-xs text-right hidden sm:block">
+            <div class="font-bold text-slate-700">{{ tournament.userProfile()?.name }}</div>
+            <div class="text-slate-400" *ngIf="isDebater()">Record: {{ getMyRecord().wins }}W - {{ getMyRecord().losses }}L</div>
+          </div>
+          <button (click)="tournament.logout()" class="text-xs font-bold text-red-500 hover:bg-red-50 px-3 py-2 rounded transition-colors">
+            Log Out
+          </button>
+        </div>
+      </header>
 
-      <!-- 2. Main Workspace -->
-      <main class="flex-1 overflow-hidden relative flex">
+      <!-- ADMIN VIEW -->
+      <app-admin *ngIf="isAdmin()" />
+
+      <!-- DEBATER VIEW -->
+      <div *ngIf="isDebater()" class="p-8 max-w-4xl mx-auto">
+        <div class="bg-white p-8 rounded-2xl shadow-sm border border-slate-200 text-center">
+          <div class="w-20 h-20 bg-purple-100 text-purple-600 rounded-full flex items-center justify-center text-3xl font-bold mx-auto mb-4">
+            {{ tournament.userProfile()?.name.charAt(0) }}
+          </div>
+          <h2 class="text-2xl font-bold text-slate-800">Welcome, {{ tournament.userProfile()?.name }}</h2>
+          <p class="text-slate-500 mb-6">You are registered as a Debater.</p>
+          
+          <div class="grid grid-cols-2 gap-4 max-w-sm mx-auto mb-8">
+            <div class="bg-green-50 p-4 rounded-xl border border-green-100">
+              <div class="text-2xl font-bold text-green-600">{{ getMyRecord().wins }}</div>
+              <div class="text-xs font-bold text-green-800 uppercase">Wins</div>
+            </div>
+            <div class="bg-red-50 p-4 rounded-xl border border-red-100">
+              <div class="text-2xl font-bold text-red-600">{{ getMyRecord().losses }}</div>
+              <div class="text-xs font-bold text-red-800 uppercase">Losses</div>
+            </div>
+          </div>
+
+          <div class="text-sm text-slate-400 italic">
+            Wait for the administrator to pair you in a round.<br>
+            Your results will appear here automatically.
+          </div>
+        </div>
+      </div>
+
+      <!-- JUDGE VIEW -->
+      <div *ngIf="isJudge()" class="h-[calc(100vh-64px)] flex flex-col">
         
-        <!-- Left Sidebar: Tournament History (Collapsible) -->
-        <aside *ngIf="showHistory()" class="w-64 bg-slate-100 border-r border-slate-200 overflow-y-auto flex-none flex flex-col transition-all z-20">
-          <div class="p-4 border-b border-slate-200 bg-white sticky top-0">
-            <h3 class="font-bold text-slate-700">Tournament Log</h3>
-            <p class="text-xs text-slate-500">Round {{ tournament.roundCounter() }} in progress</p>
-          </div>
+        <!-- B1. JUDGE DASHBOARD (Select Round) -->
+        <div *ngIf="!tournament.activeDebateId()" class="p-8 max-w-4xl mx-auto w-full">
+          <h2 class="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">Your Assignments</h2>
           
-          <div class="flex-1 p-2 space-y-2">
-            <div *ngIf="tournament.history().length === 0" class="text-center p-4 text-xs text-slate-400 italic">
-              No previous rounds recorded.
+          <div class="grid gap-4">
+            <div *ngFor="let debate of tournament.getMyAssignments()" 
+                 (click)="tournament.activeDebateId.set(debate.id)"
+                 class="bg-white p-6 rounded-xl shadow-sm border border-slate-200 hover:border-blue-400 hover:shadow-md cursor-pointer transition-all group">
+              <div class="flex justify-between">
+                <span class="bg-slate-800 text-white text-xs font-bold px-2 py-1 rounded">OPEN ROUND</span>
+                <span class="text-xs text-slate-400 group-hover:text-blue-600">Click to Start &rarr;</span>
+              </div>
+              <h3 class="text-xl font-bold text-slate-800 mt-3 mb-2">{{ debate.topic }}</h3>
+              <div class="flex items-center gap-4 text-sm text-slate-600">
+                <div class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-blue-500"></span> <strong>Aff:</strong> {{ debate.affName }}</div>
+                <div class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-red-500"></span> <strong>Neg:</strong> {{ debate.negName }}</div>
+              </div>
             </div>
 
-            <!-- CLICKABLE ROUND CARD -->
-            <div *ngFor="let round of tournament.history()" 
-                 (click)="tournament.loadRound(round)"
-                 class="bg-white p-3 rounded shadow-sm border border-slate-200 relative group cursor-pointer hover:border-blue-300 hover:shadow-md transition-all">
-              
-              <div class="flex justify-between items-start pointer-events-none">
-                <span class="text-xs font-bold text-slate-600">Rd {{ getRoundNumber(round) }}</span>
-                <span class="text-[10px] text-slate-400">{{ round.timestamp | date:'shortTime' }}</span>
-              </div>
-              <div class="mt-1 font-bold text-sm pointer-events-none" 
-                   [class.text-blue-600]="round.decision === 'Aff'"
-                   [class.text-red-600]="round.decision === 'Neg'">
-                Winner: {{ round.decision }}
-              </div>
-              <div class="text-xs text-slate-500 mt-1 pointer-events-none">
-                Score: {{ round.affScore }} - {{ round.negScore }}
-              </div>
-              
-              <button (click)="tournament.deleteRound(round.id); $event.stopPropagation()" 
-                class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 text-slate-300 hover:text-red-500 transition-opacity p-1">
-                &times;
-              </button>
+            <div *ngIf="tournament.getMyAssignments().length === 0" class="text-center py-12 border-2 border-dashed border-slate-200 rounded-xl">
+              <p class="text-slate-400">No debates assigned.</p>
+              <p class="text-xs text-slate-300 mt-1">Please wait for the administrator.</p>
             </div>
           </div>
-
-          <div class="p-2 border-t border-slate-200">
-            <button (click)="tournament.clearHistory()" class="w-full text-xs text-red-400 hover:text-red-600 hover:bg-red-50 py-2 rounded">
-              Clear Tournament History
-            </button>
-          </div>
-        </aside>
-
-        <!-- Center: Flow Sheet -->
-        <div class="flex-1 overflow-hidden relative h-full">
-           <!-- Toggle Sidebar Button -->
-          <button (click)="toggleHistory()" class="absolute left-2 top-2 z-30 bg-white p-2 rounded-full shadow border border-slate-200 text-slate-500 hover:text-blue-600">
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
-            </svg>
-          </button>
-          
-          <app-flow class="h-full block" />
         </div>
 
-      </main>
-
-      <!-- 3. Bottom Footer (Ballot) -->
-      <footer class="bg-white border-t border-slate-200 p-2 flex-none z-40">
-        <div class="max-w-7xl mx-auto flex justify-between items-center">
-          <div class="text-xs text-slate-400 flex items-center gap-2">
-            <strong>DebateMate</strong> 
-            <span class="bg-slate-100 px-2 py-0.5 rounded text-slate-500 font-mono">Round {{ tournament.roundCounter() }}</span>
+        <!-- B2. JUDGING INTERFACE (Timer/Flow/Ballot) -->
+        <div *ngIf="tournament.activeDebateId()" class="flex flex-col h-full overflow-hidden">
+          <app-timer class="flex-none" />
+          <div class="bg-slate-100 px-4 py-1 text-xs text-center border-b border-slate-200 flex justify-between items-center">
+             <span class="font-bold text-slate-600">Judging: {{ getCurrentDebate()?.topic }}</span>
+             <button (click)="tournament.activeDebateId.set(null)" class="text-red-500 hover:underline">Exit Round</button>
           </div>
-          
-          <button (click)="showBallot.set(!showBallot())" 
-            class="px-6 py-2 bg-slate-900 text-white font-bold rounded-lg hover:bg-slate-800 flex items-center gap-2 transition-all">
-            <span>{{ showBallot() ? 'Hide Ballot' : 'Score Round' }}</span>
-          </button>
+          <main class="flex-1 p-4 overflow-hidden relative"><app-flow class="h-full block" /></main>
+          <footer class="bg-white border-t border-slate-200 p-2 flex-none z-40">
+            <div class="max-w-7xl mx-auto flex justify-between items-center">
+              <div class="text-xs text-slate-400"><strong>DebateMate</strong> 2025</div>
+              <button (click)="showBallot.set(!showBallot())" class="px-6 py-2 bg-slate-900 text-white font-bold rounded-lg hover:bg-slate-800 transition-all">{{ showBallot() ? 'Hide Ballot' : 'Score Round' }}</button>
+            </div>
+            <div *ngIf="showBallot()" class="border-t border-slate-100 mt-2 p-4 bg-slate-50 max-h-[60vh] overflow-y-auto"><div class="max-w-3xl mx-auto"><app-ballot /></div></div>
+          </footer>
         </div>
-
-        <div *ngIf="showBallot()" class="border-t border-slate-100 mt-2 p-4 bg-slate-50 max-h-[60vh] overflow-y-auto">
-          <div class="max-w-3xl mx-auto">
-            <app-ballot />
-          </div>
-        </div>
-      </footer>
-
+      </div>
       <app-global-tooltip />
     </div>
   `
@@ -105,14 +119,11 @@ import { TournamentService } from './tournament.service';
 export class AppComponent {
   tournament = inject(TournamentService);
   showBallot = signal(false);
-  showHistory = signal(false);
+  
+  isAdmin = computed(() => this.tournament.userRole() === 'Admin');
+  isJudge = computed(() => this.tournament.userRole() === 'Judge');
+  isDebater = computed(() => this.tournament.userRole() === 'Debater');
 
-  toggleHistory() {
-    this.showHistory.update(v => !v);
-  }
-
-  getRoundNumber(round: any) {
-    const index = this.tournament.history().indexOf(round);
-    return this.tournament.history().length - index;
-  }
+  getCurrentDebate() { return this.tournament.debates().find(d => d.id === this.tournament.activeDebateId()); }
+  getMyRecord() { return this.tournament.getMyDebaterRecord(); }
 }
