@@ -31,7 +31,7 @@ body {
 DebateMate is a real-time Lincoln-Douglas adjudication system. It features a tri-role interface:
 1.  **Administrator:** Matches debaters, assigns judges, and tracks tournament standings (Wins/Losses).
 2.  **Judge:** Receives assignments, times rounds, flows arguments, and submits ballots.
-3.  **Debater:** Logs in to register for the tournament and view their own record.
+3.  **Debater:** Logs in to register, times their own rounds, and reviews feedback.
 
 ### **Tech Stack**
 * **Framework:** Angular v21 (Signals Architecture)
@@ -42,8 +42,7 @@ DebateMate is a real-time Lincoln-Douglas adjudication system. It features a tri
 ## 🚀 Getting Started
 1.  **Install:** \`npm install\`
 2.  **Run:** \`npm start\`
-3.  **Login:** * **Debaters:** Log in first so your name appears in the Admin's list.
-    * **Admin:** Log in to see the "Registered Debaters" list and create matches.
+3.  **Login:** Users must be logged in to appear in the Administrator's lists.
 `
   },
   {
@@ -80,7 +79,7 @@ bootstrapApplication(AppComponent)
 import { initializeApp } from 'firebase/app';
 import { 
   getFirestore, collection, doc, addDoc, updateDoc, 
-  onSnapshot, setDoc
+  onSnapshot, setDoc, deleteDoc
 } from 'firebase/firestore';
 import { 
   getAuth, signInAnonymously, onAuthStateChanged, 
@@ -91,9 +90,9 @@ import {
 export interface Debate {
   id: string;
   topic: string;
-  affId: string; // Debater UID
+  affId: string;
   affName: string;
-  negId: string; // Debater UID
+  negId: string;
   negName: string;
   judgeIds: string[]; 
   status: 'Open' | 'Closed';
@@ -128,11 +127,8 @@ export interface DebaterStats {
 export class TournamentService {
   user = signal<User | null>(null);
   userProfile = signal<UserProfile | null>(null);
-  
-  // FIX: Explicitly added userRole signal
   userRole = signal<'Admin' | 'Judge' | 'Debater'>('Debater');
   
-  // Collections
   judges = signal<UserProfile[]>([]);
   debaters = signal<UserProfile[]>([]);
   debates = signal<Debate[]>([]);
@@ -140,31 +136,34 @@ export class TournamentService {
   
   activeDebateId = signal<string | null>(null);
 
-  // Computed Standings (Leaderboard)
   standings = computed(() => {
     const stats: Record<string, DebaterStats> = {};
-    
-    // Initialize stats for all registered debaters
     this.debaters().forEach(d => {
       stats[d.id] = { id: d.id, name: d.name, wins: 0, losses: 0 };
     });
+    
+    // Iterate debates to calculate wins based on Majority Vote
+    this.debates().forEach(debate => {
+       const ballots = this.results().filter(r => r.debateId === debate.id);
+       if (ballots.length === 0) return;
 
-    // Calculate based on Results + Debate Link
-    this.results().forEach(r => {
-      const debate = this.debates().find(d => d.id === r.debateId);
-      if (debate) {
-        // Ensure stats objects exist (in case debater deleted but record remains)
-        if (!stats[debate.affId]) stats[debate.affId] = { id: debate.affId, name: debate.affName, wins: 0, losses: 0 };
-        if (!stats[debate.negId]) stats[debate.negId] = { id: debate.negId, name: debate.negName, wins: 0, losses: 0 };
+       let affVotes = 0;
+       let negVotes = 0;
+       ballots.forEach(b => b.decision === 'Aff' ? affVotes++ : negVotes++);
 
-        if (r.decision === 'Aff') {
-          stats[debate.affId].wins++;
-          stats[debate.negId].losses++;
-        } else {
-          stats[debate.negId].wins++;
-          stats[debate.affId].losses++;
-        }
-      }
+       // Only assign a win if a vote has occurred
+       // Ensure stats objects exist 
+       if (!stats[debate.affId]) stats[debate.affId] = { id: debate.affId, name: debate.affName, wins: 0, losses: 0 };
+       if (!stats[debate.negId]) stats[debate.negId] = { id: debate.negId, name: debate.negName, wins: 0, losses: 0 };
+
+       if (affVotes > negVotes) {
+         stats[debate.affId].wins++;
+         stats[debate.negId].losses++;
+       } else if (negVotes > affVotes) {
+         stats[debate.negId].wins++;
+         stats[debate.affId].losses++;
+       }
+       // Ties (rare/impossible with odd judges) result in no win increment
     });
 
     return Object.values(stats).sort((a, b) => b.wins - a.wins);
@@ -227,59 +226,52 @@ export class TournamentService {
     const savedRole = localStorage.getItem('debate-user-role') as any;
 
     if (savedName && savedRole) {
-      this.userRole.set(savedRole); // Update role signal
+      this.userRole.set(savedRole);
       this.userProfile.set({ id: uid, name: savedName, role: savedRole, isOnline: true });
+      this.updateCloudProfile(uid, savedName, savedRole);
     }
   }
 
   private startListeners() {
     if (!this.db) return;
-    
-    const judgesRef = this.getCollection('judges');
-    onSnapshot(judgesRef, (snap) => {
-      this.judges.set(snap.docs.map(d => ({ id: d.id, ...d.data() } as UserProfile)));
-    });
-
-    const debatersRef = this.getCollection('debaters');
-    onSnapshot(debatersRef, (snap) => {
-      this.debaters.set(snap.docs.map(d => ({ id: d.id, ...d.data() } as UserProfile)));
-    });
-
-    const debatesRef = this.getCollection('debates');
-    onSnapshot(debatesRef, (snap) => {
-      this.debates.set(snap.docs.map(d => ({ id: d.id, ...d.data() } as Debate)));
-    });
-
-    const resultsRef = this.getCollection('results');
-    onSnapshot(resultsRef, (snap) => {
-      this.results.set(snap.docs.map(d => ({ id: d.id, ...d.data() } as RoundResult)));
-    });
+    onSnapshot(this.getCollection('judges'), (s) => this.judges.set(s.docs.map(d => ({id:d.id, ...d.data()} as UserProfile))));
+    onSnapshot(this.getCollection('debaters'), (s) => this.debaters.set(s.docs.map(d => ({id:d.id, ...d.data()} as UserProfile))));
+    onSnapshot(this.getCollection('debates'), (s) => this.debates.set(s.docs.map(d => ({id:d.id, ...d.data()} as Debate))));
+    onSnapshot(this.getCollection('results'), (s) => this.results.set(s.docs.map(d => ({id:d.id, ...d.data()} as RoundResult))));
   }
   
   async setProfile(name: string, role: 'Admin' | 'Judge' | 'Debater') {
-    const uid = this.user()?.uid || 'demo-' + Math.random();
-    
-    this.userRole.set(role); // Update role signal
-    
+    let currentUser = this.user();
+    if (!currentUser && this.auth) currentUser = this.auth.currentUser;
+    const uid = currentUser?.uid || 'demo-' + Math.random().toString(36).substring(7);
+    this.userRole.set(role);
     const profile: UserProfile = { id: uid, name, role, isOnline: true };
-
     localStorage.setItem('debate-user-name', name);
     localStorage.setItem('debate-user-role', role);
-    
-    if (this.db && this.user()) {
+    this.userProfile.set(profile);
+    this.updateCloudProfile(uid, name, role);
+  }
+
+  private async updateCloudProfile(uid: string, name: string, role: string) {
+    if (this.db) {
       try {
         const collectionName = role === 'Debater' ? 'debaters' : (role === 'Judge' ? 'judges' : null);
         if (collectionName) {
-          const ref = doc(this.db, 'artifacts', this.appId, 'public', 'data', collectionName, profile.id);
-          await setDoc(ref, profile);
+          const ref = doc(this.db, 'artifacts', this.appId, 'public', 'data', collectionName, uid);
+          await setDoc(ref, { id: uid, name, role, isOnline: true }, { merge: true });
         }
-      } catch (e) { console.warn('Offline mode: Profile not saved to cloud'); }
+      } catch (e) { console.warn('Cloud sync failed', e); }
     }
-    
-    this.userProfile.set(profile);
   }
 
   async logout() {
+    const profile = this.userProfile();
+    if (profile && this.db) {
+        const collectionName = profile.role === 'Debater' ? 'debaters' : (profile.role === 'Judge' ? 'judges' : null);
+        if (collectionName) {
+             try { await deleteDoc(doc(this.db, 'artifacts', this.appId, 'public', 'data', collectionName, profile.id)); } catch(e) {}
+        }
+    }
     if (this.auth) await signOut(this.auth);
     localStorage.removeItem('debate-user-name');
     localStorage.removeItem('debate-user-role');
@@ -293,8 +285,15 @@ export class TournamentService {
         this.debates.update(d => [...d, { id: 'loc-'+Date.now(), topic, affId, affName, negId, negName, judgeIds:[], status:'Open' }]);
         return;
     }
-    const ref = this.getCollection('debates');
-    await addDoc(ref, { topic, affId, affName, negId, negName, judgeIds: [], status: 'Open' });
+    await addDoc(this.getCollection('debates'), { topic, affId, affName, negId, negName, judgeIds: [], status: 'Open' });
+  }
+
+  async deleteDebate(debateId: string) {
+    if (!this.db) {
+        this.debates.update(d => d.filter(x => x.id !== debateId));
+        return;
+    }
+    await deleteDoc(doc(this.db, 'artifacts', this.appId, 'public', 'data', 'debates', debateId));
   }
 
   async assignJudge(debateId: string, judgeId: string) {
@@ -314,13 +313,17 @@ export class TournamentService {
     await updateDoc(ref, { judgeIds: debate.judgeIds.filter(id => id !== judgeId) });
   }
 
+  // Modified: Upsert ballot (update if exists, create if new)
   async submitBallot(debateId: string, result: Omit<RoundResult, 'id' | 'judgeId' | 'judgeName' | 'debateId'>) {
     const uid = this.user()?.uid || 'anon';
     const name = this.userProfile()?.name || 'Anonymous';
     const finalResult = { ...result, debateId, judgeId: uid, judgeName: name, timestamp: Date.now() };
 
     if (this.db) {
-        await addDoc(this.getCollection('results'), finalResult);
+        // Use specific ID: debateId_judgeId to ensure 1 ballot per judge per round
+        const ballotId = \`\${debateId}_\${uid}\`;
+        const ref = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'results', ballotId);
+        await setDoc(ref, finalResult, { merge: true });
     } else {
         console.log('Ballot submitted locally (Offline Mode):', finalResult);
     }
@@ -334,10 +337,13 @@ export class TournamentService {
     const uid = this.userProfile()?.id;
     if (!uid) return [];
     if (!this.db) return this.debates(); 
+    
     return this.debates().filter(d => {
-      const isAssigned = d.judgeIds.includes(uid) && d.status === 'Open';
-      const alreadyVoted = this.results().some(r => r.debateId === d.id && r.judgeId === uid);
-      return isAssigned && !alreadyVoted;
+      const isJudge = d.judgeIds.includes(uid);
+      // DEBATERS can also "see" their rounds to time them
+      const isDebater = d.affId === uid || d.negId === uid;
+      
+      return (isJudge || isDebater) && d.status === 'Open';
     });
   }
 
@@ -345,6 +351,18 @@ export class TournamentService {
     const uid = this.userProfile()?.id;
     if (!uid) return { wins: 0, losses: 0 };
     return this.standings().find(s => s.id === uid) || { id: uid, name: '', wins: 0, losses: 0 };
+  }
+
+  getWinner(debateId: string): 'Aff' | 'Neg' | 'Pending' {
+    const ballots = this.results().filter(r => r.debateId === debateId);
+    if (ballots.length === 0) return 'Pending';
+    
+    let aff = 0, neg = 0;
+    ballots.forEach(b => b.decision === 'Aff' ? aff++ : neg++);
+    
+    if (aff > neg) return 'Aff';
+    if (neg > aff) return 'Neg';
+    return 'Pending'; // Tie or not enough votes
   }
 }`
   },
@@ -372,22 +390,22 @@ import { TournamentService } from './tournament.service';
           </div>
           <div>
             <label class="block text-sm font-bold text-slate-700 mb-2">Role</label>
-            <div class="grid grid-cols-3 gap-2">
+            <div class="grid grid-cols-3 gap-2" role="group" aria-label="Select User Role">
               <button (click)="role = 'Debater'" 
                 [class]="role === 'Debater' ? 'bg-purple-600 text-white ring-2 ring-purple-300' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'"
-                class="p-3 rounded-xl font-bold transition-all border border-slate-200 text-sm">Debater</button>
+                class="p-3 rounded-xl font-bold transition-all border border-slate-200 text-sm" aria-label="Login as Debater">Debater</button>
               
               <button (click)="role = 'Judge'" 
                 [class]="role === 'Judge' ? 'bg-blue-600 text-white ring-2 ring-blue-300' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'"
-                class="p-3 rounded-xl font-bold transition-all border border-slate-200 text-sm">Judge</button>
+                class="p-3 rounded-xl font-bold transition-all border border-slate-200 text-sm" aria-label="Login as Judge">Judge</button>
               
               <button (click)="role = 'Admin'" 
                 [class]="role === 'Admin' ? 'bg-slate-800 text-white ring-2 ring-slate-400' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'"
-                class="p-3 rounded-xl font-bold transition-all border border-slate-200 text-sm">Admin</button>
+                class="p-3 rounded-xl font-bold transition-all border border-slate-200 text-sm" aria-label="Login as Administrator">Admin</button>
             </div>
           </div>
           <button (click)="enter()" [disabled]="!name" 
-            class="w-full bg-slate-900 text-white font-bold py-4 rounded-xl hover:bg-slate-800 disabled:opacity-50 transition-all">
+            class="w-full bg-slate-900 text-white font-bold py-4 rounded-xl hover:bg-slate-800 disabled:opacity-50 transition-all cursor-pointer">
             Enter Tournament
           </button>
         </div>
@@ -421,42 +439,36 @@ import { TournamentService, Debate } from './tournament.service';
           <p class="text-slate-500">Welcome, {{ tournament.userProfile()?.name }}</p>
         </div>
         <div class="flex items-center gap-4">
-          <button (click)="tournament.logout()" class="text-sm font-bold text-red-500 hover:text-red-700 underline">Log Out</button>
+          <button (click)="tournament.logout()" class="text-sm font-bold text-red-500 hover:text-red-700 underline" aria-label="Log Out">Log Out</button>
           <div class="flex items-center gap-2 text-sm bg-white px-3 py-1 rounded-full shadow-sm border border-slate-200">
             <span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-            <span>Live Sync</span>
+            <span>Live Sync Active</span>
           </div>
         </div>
       </header>
 
       <main class="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8">
         
-        <!-- LEFT COLUMN: Matchmaking (4 Cols) -->
         <div class="lg:col-span-4 space-y-6">
           
-          <!-- Create Debate -->
           <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
             <h2 class="font-bold text-slate-800 mb-4">Matchmaking</h2>
             <div class="space-y-4">
-              <input [(ngModel)]="newTopic" placeholder="Resolved: (Topic)" class="w-full p-2 border rounded text-sm bg-slate-50">
-              
-              <!-- Matchmaking Dropdowns -->
+              <input [(ngModel)]="newTopic" placeholder="Resolved: (Topic)" class="w-full p-2 border rounded text-sm bg-slate-50" aria-label="Debate Topic">
               <div class="space-y-2">
                 <label class="text-xs font-bold text-blue-600 uppercase">Affirmative</label>
-                <select [(ngModel)]="selectedAffId" class="w-full p-2 border rounded text-sm bg-white">
+                <select [(ngModel)]="selectedAffId" class="w-full p-2 border rounded text-sm bg-white" aria-label="Select Affirmative Debater">
                   <option value="" disabled selected>Select Debater...</option>
                   <option *ngFor="let d of tournament.debaters()" [value]="d.id">{{ d.name }}</option>
                 </select>
               </div>
-
               <div class="space-y-2">
                 <label class="text-xs font-bold text-red-600 uppercase">Negative</label>
-                <select [(ngModel)]="selectedNegId" class="w-full p-2 border rounded text-sm bg-white">
+                <select [(ngModel)]="selectedNegId" class="w-full p-2 border rounded text-sm bg-white" aria-label="Select Negative Debater">
                   <option value="" disabled selected>Select Debater...</option>
                   <option *ngFor="let d of tournament.debaters()" [value]="d.id">{{ d.name }}</option>
                 </select>
               </div>
-
               <button (click)="create()" [disabled]="!newTopic || !selectedAffId || !selectedNegId"
                 class="w-full bg-slate-900 text-white font-bold py-3 rounded-lg hover:bg-slate-800 disabled:opacity-50 mt-4 transition-all">
                 Create Matchup
@@ -464,7 +476,35 @@ import { TournamentService, Debate } from './tournament.service';
             </div>
           </div>
 
-          <!-- Standings Leaderboard -->
+          <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+            <h2 class="font-bold text-slate-800 mb-4">Logged In Participants</h2>
+            <div class="space-y-4">
+              <div>
+                <h3 class="text-xs font-bold text-slate-500 uppercase mb-2 flex justify-between">
+                  <span>Judges</span><span class="bg-blue-100 text-blue-800 px-2 rounded">{{ tournament.judges().length }}</span>
+                </h3>
+                <div class="max-h-32 overflow-y-auto space-y-1">
+                  <div *ngFor="let j of tournament.judges()" class="flex items-center gap-2 p-1.5 bg-slate-50 rounded text-sm">
+                    <div class="w-2 h-2 bg-green-500 rounded-full"></div> {{ j.name }}
+                  </div>
+                  <div *ngIf="tournament.judges().length === 0" class="text-xs text-slate-400 italic">No judges online.</div>
+                </div>
+              </div>
+              <hr class="border-slate-100">
+              <div>
+                <h3 class="text-xs font-bold text-slate-500 uppercase mb-2 flex justify-between">
+                  <span>Debaters</span><span class="bg-purple-100 text-purple-800 px-2 rounded">{{ tournament.debaters().length }}</span>
+                </h3>
+                <div class="max-h-32 overflow-y-auto space-y-1">
+                  <div *ngFor="let d of tournament.debaters()" class="flex items-center gap-2 p-1.5 bg-slate-50 rounded text-sm">
+                    <div class="w-2 h-2 bg-purple-500 rounded-full"></div> {{ d.name }}
+                  </div>
+                  <div *ngIf="tournament.debaters().length === 0" class="text-xs text-slate-400 italic">No debaters online.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          
           <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
             <h2 class="font-bold text-slate-800 mb-4">Leaderboard</h2>
             <div class="overflow-hidden rounded-lg border border-slate-100">
@@ -485,43 +525,41 @@ import { TournamentService, Debate } from './tournament.service';
           </div>
         </div>
 
-        <!-- RIGHT COLUMN: Active Debates & Judges (8 Cols) -->
         <div class="lg:col-span-8 space-y-6">
-          
-          <div class="flex justify-between items-end">
-            <h2 class="font-bold text-slate-700">Active Rounds</h2>
-            <div class="text-xs text-slate-500"><span class="font-bold text-slate-900">{{ tournament.judges().length }}</span> Judges Online</div>
-          </div>
-          
+          <h2 class="font-bold text-slate-700">Active Rounds</h2>
           <div *ngFor="let debate of tournament.debates()" class="bg-white p-5 rounded-xl shadow-sm border border-slate-200">
             <div class="flex justify-between items-start mb-4 border-b border-slate-100 pb-3">
               <div>
-                <h3 class="font-bold text-lg text-slate-800">{{ debate.topic }}</h3>
+                <div class="flex items-center gap-3">
+                    <h3 class="font-bold text-lg text-slate-800">{{ debate.topic }}</h3>
+                    <span *ngIf="getWinner(debate.id) !== 'Pending'" class="bg-yellow-100 text-yellow-800 text-[10px] px-2 py-0.5 rounded font-bold border border-yellow-200">
+                        🏆 WINNER: {{ getWinnerName(debate) }}
+                    </span>
+                </div>
                 <div class="text-sm text-slate-500 mt-1 flex items-center gap-3">
                   <span class="bg-blue-100 text-blue-800 px-2 py-0.5 rounded text-xs font-bold">{{ debate.affName }}</span>
                   <span class="text-slate-300 font-bold">vs</span>
                   <span class="bg-red-100 text-red-800 px-2 py-0.5 rounded text-xs font-bold">{{ debate.negName }}</span>
                 </div>
               </div>
-              <div class="relative">
-                <select #assignSelect (change)="assign(debate.id, assignSelect.value); assignSelect.value = ''" 
-                  class="bg-slate-100 border border-slate-300 text-slate-700 text-xs font-bold py-2 px-3 rounded focus:outline-none hover:bg-slate-200 cursor-pointer">
-                  <option value="" disabled selected>+ Add Judge</option>
-                  <option *ngFor="let judge of getUnassignedJudges(debate)" [value]="judge.id">{{ judge.name }}</option>
-                </select>
+              <div class="flex gap-2 items-center">
+                <div class="relative">
+                    <select #assignSelect (change)="assign(debate.id, assignSelect.value); assignSelect.value = ''" 
+                      class="bg-slate-100 border border-slate-300 text-slate-700 text-xs font-bold py-2 px-3 rounded focus:outline-none hover:bg-slate-200 cursor-pointer" aria-label="Assign Judge">
+                      <option value="" disabled selected>+ Add Judge</option>
+                      <option *ngFor="let judge of getUnassignedJudges(debate)" [value]="judge.id">{{ judge.name }}</option>
+                    </select>
+                </div>
+                <button (click)="tournament.deleteDebate(debate.id)" class="text-slate-300 hover:text-red-500 p-2" title="Delete Debate"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" /></svg></button>
               </div>
             </div>
 
-            <!-- Judge Status Grid -->
             <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div *ngFor="let judgeId of debate.judgeIds" class="bg-slate-50 rounded-lg p-3 border border-slate-200 relative group">
                 <div class="flex justify-between items-center mb-1">
-                  <span class="text-xs font-bold text-slate-700 flex items-center gap-2">
-                    <span class="w-2 h-2 rounded-full bg-green-500"></span> {{ getJudgeName(judgeId) }}
-                  </span>
-                  <button (click)="remove(debate.id, judgeId)" class="text-slate-300 hover:text-red-500 font-bold text-xs">Remove</button>
+                  <span class="text-xs font-bold text-slate-700 flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-green-500"></span> {{ getJudgeName(judgeId) }}</span>
+                  <button (click)="remove(debate.id, judgeId)" class="text-slate-300 hover:text-red-500 font-bold text-xs" aria-label="Remove Judge">Remove</button>
                 </div>
-                
                 <div *ngIf="getResult(debate.id, judgeId) as res; else pending" class="animate-in fade-in bg-white p-2 rounded border border-slate-100 mt-2">
                   <div class="flex justify-between text-xs font-bold mb-1">
                     <span [class.text-blue-600]="res.decision === 'Aff'" [class.text-red-600]="res.decision === 'Neg'">Voted: {{ res.decision }}</span>
@@ -529,16 +567,11 @@ import { TournamentService, Debate } from './tournament.service';
                   </div>
                   <div class="text-[10px] text-slate-500 italic truncate">"{{ res.rfd }}"</div>
                 </div>
-                <ng-template #pending>
-                  <div class="text-[10px] text-slate-400 mt-2 pl-4">Waiting for ballot...</div>
-                </ng-template>
+                <ng-template #pending><div class="text-[10px] text-slate-400 mt-2 pl-4">Waiting for ballot...</div></ng-template>
               </div>
-              <div *ngIf="debate.judgeIds.length === 0" class="col-span-2 text-center py-4 border-2 border-dashed border-slate-100 rounded-lg text-slate-300 text-xs italic">
-                Waiting for judge assignment.
-              </div>
+              <div *ngIf="debate.judgeIds.length === 0" class="col-span-2 text-center py-4 border-2 border-dashed border-slate-100 rounded-lg text-slate-300 text-xs italic">Waiting for judge assignment.</div>
             </div>
           </div>
-          
           <div *ngIf="tournament.debates().length === 0" class="text-center py-12 bg-white rounded-xl border border-dashed border-slate-300"><p class="text-slate-400">No active rounds.</p></div>
         </div>
       </main>
@@ -547,135 +580,27 @@ import { TournamentService, Debate } from './tournament.service';
 })
 export class AdminComponent {
   tournament = inject(TournamentService);
-  newTopic = ''; 
-  selectedAffId = '';
-  selectedNegId = '';
+  newTopic = ''; selectedAffId = ''; selectedNegId = '';
 
   create() { 
     const aff = this.tournament.debaters().find(d => d.id === this.selectedAffId);
     const neg = this.tournament.debaters().find(d => d.id === this.selectedNegId);
-    
     if (aff && neg) {
       this.tournament.createDebate(this.newTopic, aff.id, aff.name, neg.id, neg.name);
       this.newTopic = ''; this.selectedAffId = ''; this.selectedNegId = ''; 
     }
   }
-
   assign(debateId: string, judgeId: string) { this.tournament.assignJudge(debateId, judgeId); }
   remove(debateId: string, judgeId: string) { this.tournament.removeJudge(debateId, judgeId); }
   getJudgeName(id: string) { return this.tournament.judges().find(j => j.id === id)?.name || 'Unknown'; }
   getUnassignedJudges(debate: Debate) { return this.tournament.judges().filter(j => !debate.judgeIds.includes(j.id)); }
   getResult(debateId: string, judgeId: string) { return this.tournament.results().find(r => r.debateId === debateId && r.judgeId === judgeId); }
-}`
-  },
-  {
-    path: 'src/app/global-tooltip.component.ts',
-    content: `import { Component, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
-import { TooltipService } from './tooltip.service';
-
-@Component({
-  selector: 'app-global-tooltip',
-  standalone: true,
-  imports: [CommonModule],
-  template: \`
-    <div *ngIf="svc.isVisible()"
-         class="fixed z-[9999] pointer-events-none transition-opacity duration-200"
-         [style.top.px]="svc.coords().y"
-         [style.left.px]="svc.coords().x"
-         style="transform: translateX(-50%);">
-      <div class="bg-slate-900 text-white text-xs p-3 rounded-lg shadow-2xl border border-slate-700 w-48 relative animate-in fade-in zoom-in-95 duration-100">
-        <div class="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-slate-900 rotate-45 border-t border-l border-slate-700"></div>
-        <span class="font-bold block mb-1 text-slate-300 uppercase text-[10px] tracking-wider">Definition</span>
-        <p class="leading-relaxed">{{ svc.text() }}</p>
-      </div>
-    </div>
-  \`
-})
-export class GlobalTooltipComponent {
-  svc = inject(TooltipService);
-}`
-  },
-  {
-    path: 'src/app/term.component.ts',
-    content: `import { Component, Input, ElementRef, ViewChild, inject, HostListener } from '@angular/core';
-import { CommonModule } from '@angular/common';
-import { TooltipService } from './tooltip.service';
-
-@Component({
-  selector: 'app-term',
-  standalone: true,
-  imports: [CommonModule],
-  template: \`
-    <span #trigger (mouseenter)="onEnter()" (mouseleave)="onLeave()"
-          class="cursor-help underline decoration-dotted decoration-slate-400 underline-offset-4 decoration-2 hover:text-blue-600 hover:decoration-blue-400 transition-colors">
-      <ng-content></ng-content>
-    </span>
-  \`
-})
-export class TermComponent {
-  @Input() lookup: string = ''; 
-  @ViewChild('trigger') trigger!: ElementRef;
-  tooltipService = inject(TooltipService);
-  onEnter() { const rect = this.trigger.nativeElement.getBoundingClientRect(); this.tooltipService.show(this.lookup, rect); }
-  onLeave() { this.tooltipService.hide(); }
-  @HostListener('window:scroll') onScroll() { this.tooltipService.hide(); }
-}`
-  },
-  {
-    path: 'src/app/timer.component.ts',
-    content: `import { Component, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
-import { DebateService } from './debate.service';
-import { TermComponent } from './term.component';
-
-@Component({
-  selector: 'app-timer',
-  standalone: true,
-  imports: [CommonModule, TermComponent],
-  template: \`
-    <div class="bg-white border-b border-slate-200 shadow-sm sticky top-0 z-50">
-      <div class="max-w-[1920px] mx-auto px-4 py-2">
-        <div class="flex items-center justify-between gap-4">
-          <div class="flex items-center gap-3 bg-blue-50 px-3 py-1 rounded-lg border border-blue-100 min-w-[140px]">
-            <div class="flex flex-col">
-              <span class="text-[10px] font-bold text-blue-600 uppercase tracking-wide"><app-term lookup="Prep Time">Aff Prep</app-term></span>
-              <span class="font-mono text-xl font-bold text-slate-700 leading-none">{{ debate.formatTime(debate.affPrep()) }}</span>
-            </div>
-            <button (click)="debate.toggleAffPrep()" class="ml-auto text-blue-600 hover:bg-blue-100 p-1 rounded-full">
-               <svg *ngIf="debate.activeTimer() !== 'AFF_PREP'" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-6 h-6"><path fill-rule="evenodd" d="M4.5 5.653c0-1.426 1.529-2.33 2.779-1.643l11.54 6.348c1.295.712 1.295 2.573 0 3.285L7.28 19.991c-1.25.687-2.779-.217-2.779-1.643V5.653z" clip-rule="evenodd" /></svg>
-               <svg *ngIf="debate.activeTimer() === 'AFF_PREP'" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-6 h-6"><path fill-rule="evenodd" d="M6.75 5.25a.75.75 0 01.75-.75H9a.75.75 0 01.75.75v13.5a.75.75 0 01-.75.75H7.5a.75.75 0 01-.75-.75V5.25zm7.5 0A.75.75 0 0115 4.5h1.5a.75.75 0 01.75.75v13.5a.75.75 0 01-.75.75H15a.75.75 0 01-.75-.75V5.25z" clip-rule="evenodd" /></svg>
-            </button>
-          </div>
-          <div class="flex-1 flex items-center justify-center gap-6">
-            <div class="bg-slate-900 text-white px-6 py-1 rounded-lg flex items-center gap-4 shadow-md min-w-[200px] justify-center">
-              <span class="font-mono text-4xl font-bold tracking-tighter" [class.text-emerald-400]="debate.activeTimer() === 'SPEECH'">{{ debate.formatTime(debate.speechTimer()) }}</span>
-              <button (click)="debate.toggleSpeech()" class="hover:text-emerald-400 transition-colors">
-                <svg *ngIf="debate.activeTimer() !== 'SPEECH'" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-8 h-8"><path fill-rule="evenodd" d="M2.25 12c0-5.385 4.365-9.75 9.75-9.75s9.75 4.365 9.75 9.75-4.365 9.75-9.75 9.75S2.25 17.385 2.25 12zm14.024-.983a1.125 1.125 0 010 1.966l-5.603 3.113A1.125 1.125 0 019 15.113V8.887c0-.857.921-1.4 1.671-.983l5.603 3.113z" clip-rule="evenodd" /></svg>
-                <svg *ngIf="debate.activeTimer() === 'SPEECH'" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-8 h-8"><path fill-rule="evenodd" d="M2.25 12c0-5.385 4.365-9.75 9.75-9.75s9.75 4.365 9.75 9.75-4.365 9.75-9.75 9.75S2.25 17.385 2.25 12zM9 8.25a.75.75 0 00-.75.75v6c0 .414.336.75.75.75h.75a.75.75 0 00.75-.75V9a.75.75 0 00-.75-.75H9zm5.25 0a.75.75 0 00-.75.75v6c0 .414.336.75.75.75H15a.75.75 0 00.75-.75V9a.75.75 0 00-.75-.75h-.75z" clip-rule="evenodd" /></svg>
-              </button>
-            </div>
-          </div>
-          <div class="flex items-center gap-3 bg-red-50 px-3 py-1 rounded-lg border border-red-100 min-w-[140px]">
-            <button (click)="debate.toggleNegPrep()" class="text-red-600 hover:bg-red-100 p-1 rounded-full">
-              <svg *ngIf="debate.activeTimer() !== 'NEG_PREP'" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-6 h-6"><path fill-rule="evenodd" d="M4.5 5.653c0-1.426 1.529-2.33 2.779-1.643l11.54 6.348c1.295.712 1.295 2.573 0 3.285L7.28 19.991c-1.25.687-2.779-.217-2.779-1.643V5.653z" clip-rule="evenodd" /></svg>
-              <svg *ngIf="debate.activeTimer() === 'NEG_PREP'" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-6 h-6"><path fill-rule="evenodd" d="M6.75 5.25a.75.75 0 01.75-.75H9a.75.75 0 01.75.75v13.5a.75.75 0 01-.75.75H7.5a.75.75 0 01-.75-.75V5.25zm7.5 0A.75.75 0 0115 4.5h1.5a.75.75 0 01.75.75v13.5a.75.75 0 01-.75.75H15a.75.75 0 01-.75-.75V5.25z" clip-rule="evenodd" /></svg>
-            </button>
-            <div class="flex flex-col items-end">
-              <span class="text-[10px] font-bold text-red-600 uppercase tracking-wide"><app-term lookup="Prep Time">Neg Prep</app-term></span>
-              <span class="font-mono text-xl font-bold text-slate-700 leading-none">{{ debate.formatTime(debate.negPrep()) }}</span>
-            </div>
-          </div>
-        </div>
-        <div class="flex justify-center gap-1 mt-2 overflow-x-auto pb-1">
-           <button *ngFor="let p of debate.phases" (click)="debate.setPhase(p)" class="text-[10px] font-bold px-3 py-1 rounded-full border transition-all whitespace-nowrap" [class]="debate.currentPhase().id === p.id ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'">{{ p.id }}</button>
-        </div>
-      </div>
-    </div>
-  \`
-})
-export class TimerComponent {
-  debate = inject(DebateService);
+  
+  getWinner(debateId: string) { return this.tournament.getWinner(debateId); }
+  getWinnerName(debate: Debate) {
+     const w = this.tournament.getWinner(debate.id);
+     return w === 'Aff' ? debate.affName : (w === 'Neg' ? debate.negName : 'None');
+  }
 }`
   },
   {
@@ -685,7 +610,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { PdfService } from './pdf.service';
 import { TermComponent } from './term.component';
-import { TournamentService } from './tournament.service';
+import { TournamentService, RoundResult } from './tournament.service';
 
 @Component({
   selector: 'app-ballot',
@@ -693,49 +618,69 @@ import { TournamentService } from './tournament.service';
   imports: [CommonModule, TermComponent, FormsModule],
   template: \`
     <div id="debate-ballot" class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-      <div class="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
-        <div class="flex flex-col">
-          <h2 class="font-bold text-slate-800 text-xl tracking-tight">Official Ballot</h2>
-          <span class="text-xs text-slate-500 font-mono">Secure Submission</span>
-        </div>
-        <button (click)="toggleHints()" class="text-xs font-semibold px-3 py-1.5 rounded-full transition-all" [ngClass]="showHints() ? 'bg-blue-50 text-blue-600' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'">{{ showHints() ? 'Hide Guidelines' : 'Show Guidelines' }}</button>
+      
+      <!-- If Debater, show only feedback list -->
+      <div *ngIf="isDebater()" class="text-center">
+         <h3 class="font-bold text-slate-700 mb-4">Judge Feedback</h3>
+         <p class="text-slate-400 text-xs italic" *ngIf="getFeedback().length === 0">No ballots submitted for this round yet.</p>
+         <div *ngFor="let res of getFeedback()" class="bg-slate-50 p-3 rounded border border-slate-200 mb-2 text-left">
+            <div class="flex justify-between text-xs font-bold mb-1">
+                <span class="text-slate-700">{{ res.judgeName }}</span>
+                <span [class.text-blue-600]="res.decision === 'Aff'" [class.text-red-600]="res.decision === 'Neg'">Voted: {{ res.decision }}</span>
+            </div>
+            <div class="text-[10px] text-slate-500 mb-2">Points: {{ res.affScore }} vs {{ res.negScore }}</div>
+            <p class="text-sm text-slate-600 italic">"{{ res.rfd }}"</p>
+         </div>
       </div>
-      <div *ngIf="showHints()" class="mb-8 grid grid-cols-1 md:grid-cols-2 gap-3 transition-all">
-        <div class="bg-indigo-50 border border-indigo-100 p-3 rounded text-xs text-indigo-900"><strong>1. Framework:</strong> Weigh <app-term lookup="Value Premise">Value</app-term> & <app-term lookup="Value Criterion">Criterion</app-term>.</div>
-        <div class="bg-amber-50 border border-amber-100 p-3 rounded text-xs text-amber-900"><strong>2. Tabula Rasa:</strong> Judge only what is said. No bias.</div>
-        <div class="bg-rose-50 border border-rose-100 p-3 rounded text-xs text-rose-900"><strong>3. Drops:</strong> <app-term lookup="Dropped">Dropped</app-term> args are true.</div>
-        <div class="bg-emerald-50 border border-emerald-100 p-3 rounded text-xs text-emerald-900"><strong>4. Voters:</strong> Focus on final <app-term lookup="Voters">Voting Issues</app-term>.</div>
-      </div>
-      <div class="space-y-6">
-        <div class="grid grid-cols-2 gap-6 relative">
-          <div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-white border border-slate-200 text-slate-400 font-bold text-xs px-2 py-1 rounded-full z-10 shadow-sm">VS</div>
-          <div class="bg-slate-50 p-4 rounded-lg border transition-colors" [class.border-blue-500]="affPoints() > negPoints()" [class.border-slate-100]="affPoints() <= negPoints()">
-            <label class="block text-xs font-bold text-slate-500 uppercase mb-2">Affirmative Points</label>
-            <div class="flex items-center gap-2"><input type="number" min="0" max="30" [ngModel]="affPoints()" (ngModelChange)="setAff($event)" (input)="checkInput($event, 'aff')" class="w-full text-center text-xl font-mono font-bold border border-slate-300 rounded p-2 focus:ring-2 focus:ring-blue-500 shadow-sm"><span class="text-xs text-slate-400 font-medium">/ 30</span></div>
-            <div *ngIf="affPoints() > negPoints()" class="text-[10px] text-center text-blue-600 font-bold uppercase mt-2 tracking-wider">High Point Winner</div>
+
+      <!-- If Judge, show scoring form -->
+      <div *ngIf="!isDebater()">
+          <div class="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
+            <div class="flex flex-col">
+              <h2 class="font-bold text-slate-800 text-xl tracking-tight">Official Ballot</h2>
+              <span class="text-xs text-slate-500 font-mono">Secure Submission</span>
+            </div>
+            <button (click)="toggleHints()" class="text-xs font-semibold px-3 py-1.5 rounded-full transition-all" [ngClass]="showHints() ? 'bg-blue-50 text-blue-600' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'">{{ showHints() ? 'Hide Guidelines' : 'Show Guidelines' }}</button>
           </div>
-          <div class="bg-slate-50 p-4 rounded-lg border transition-colors" [class.border-red-500]="negPoints() > affPoints()" [class.border-slate-100]="negPoints() <= affPoints()">
-            <label class="block text-xs font-bold text-slate-500 uppercase mb-2">Negative Points</label>
-             <div class="flex items-center gap-2"><input type="number" min="0" max="30" [ngModel]="negPoints()" (ngModelChange)="setNeg($event)" (input)="checkInput($event, 'neg')" class="w-full text-center text-xl font-mono font-bold border border-slate-300 rounded p-2 focus:ring-2 focus:ring-red-500 shadow-sm"><span class="text-xs text-slate-400 font-medium">/ 30</span></div>
-             <div *ngIf="negPoints() > affPoints()" class="text-[10px] text-center text-red-600 font-bold uppercase mt-2 tracking-wider">High Point Winner</div>
+          
+          <div *ngIf="showHints()" class="mb-8 grid grid-cols-1 md:grid-cols-2 gap-3 transition-all">
+             <div class="bg-indigo-50 border border-indigo-100 p-3 rounded text-xs text-indigo-900"><strong>1. Framework:</strong> Weigh <app-term lookup="Value Premise">Value</app-term> & <app-term lookup="Value Criterion">Criterion</app-term>.</div>
+             <div class="bg-amber-50 border border-amber-100 p-3 rounded text-xs text-amber-900"><strong>2. Tabula Rasa:</strong> Judge only what is said. No bias.</div>
+             <div class="bg-rose-50 border border-rose-100 p-3 rounded text-xs text-rose-900"><strong>3. Drops:</strong> <app-term lookup="Dropped">Dropped</app-term> args are true.</div>
+             <div class="bg-emerald-50 border border-emerald-100 p-3 rounded text-xs text-emerald-900"><strong>4. Voters:</strong> Focus on final <app-term lookup="Voters">Voting Issues</app-term>.</div>
           </div>
-        </div>
-        <div>
-          <label class="block text-xs font-bold text-slate-500 uppercase mb-2">Decision</label>
-          <div class="flex gap-3">
-            <button (click)="manualOverride('Aff')" [class]="decision() === 'Aff' ? 'bg-blue-600 text-white border-blue-600 ring-2 ring-blue-200' : 'bg-white text-slate-400 border-slate-200 opacity-50 hover:opacity-100'" class="flex-1 py-4 border-2 rounded-xl font-bold text-lg transition-all flex flex-col items-center justify-center gap-1 relative overflow-hidden"><span>Affirmative</span></button>
-            <button (click)="manualOverride('Neg')" [class]="decision() === 'Neg' ? 'bg-red-600 text-white border-red-600 ring-2 ring-red-200' : 'bg-white text-slate-400 border-slate-200 opacity-50 hover:opacity-100'" class="flex-1 py-4 border-2 rounded-xl font-bold text-lg transition-all flex flex-col items-center justify-center gap-1 relative overflow-hidden"><span>Negative</span></button>
+          
+          <div class="space-y-6">
+            <div class="grid grid-cols-2 gap-6 relative">
+              <div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-white border border-slate-200 text-slate-400 font-bold text-xs px-2 py-1 rounded-full z-10 shadow-sm">VS</div>
+              <div class="bg-slate-50 p-4 rounded-lg border transition-colors" [class.border-blue-500]="affPoints() > negPoints()" [class.border-slate-100]="affPoints() <= negPoints()">
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-2">Affirmative Points</label>
+                <div class="flex items-center gap-2"><input type="number" min="0" max="30" [ngModel]="affPoints()" (ngModelChange)="setAff($event)" (input)="checkInput($event, 'aff')" class="w-full text-center text-xl font-mono font-bold border border-slate-300 rounded p-2 focus:ring-2 focus:ring-blue-500 shadow-sm"><span class="text-xs text-slate-400 font-medium">/ 30</span></div>
+              </div>
+              <div class="bg-slate-50 p-4 rounded-lg border transition-colors" [class.border-red-500]="negPoints() > affPoints()" [class.border-slate-100]="negPoints() <= affPoints()">
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-2">Negative Points</label>
+                 <div class="flex items-center gap-2"><input type="number" min="0" max="30" [ngModel]="negPoints()" (ngModelChange)="setNeg($event)" (input)="checkInput($event, 'neg')" class="w-full text-center text-xl font-mono font-bold border border-slate-300 rounded p-2 focus:ring-2 focus:ring-red-500 shadow-sm"><span class="text-xs text-slate-400 font-medium">/ 30</span></div>
+              </div>
+            </div>
+            
+            <div>
+              <label class="block text-xs font-bold text-slate-500 uppercase mb-2">Decision</label>
+              <div class="flex gap-3">
+                <button (click)="manualOverride('Aff')" [class]="decision() === 'Aff' ? 'bg-blue-600 text-white border-blue-600 ring-2 ring-blue-200' : 'bg-white text-slate-400 border-slate-200 opacity-50 hover:opacity-100'" class="flex-1 py-4 border-2 rounded-xl font-bold text-lg transition-all flex flex-col items-center justify-center gap-1 relative overflow-hidden"><span>Affirmative</span></button>
+                <button (click)="manualOverride('Neg')" [class]="decision() === 'Neg' ? 'bg-red-600 text-white border-red-600 ring-2 ring-red-200' : 'bg-white text-slate-400 border-slate-200 opacity-50 hover:opacity-100'" class="flex-1 py-4 border-2 rounded-xl font-bold text-lg transition-all flex flex-col items-center justify-center gap-1 relative overflow-hidden"><span>Negative</span></button>
+              </div>
+            </div>
+            
+            <div>
+              <label class="block text-xs font-bold text-slate-500 uppercase mb-2">Reason for Decision (RFD)</label>
+              <textarea [(ngModel)]="rfdText" class="w-full h-32 border border-slate-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-blue-500 shadow-sm resize-none" placeholder="I voted for the {{decision() || '...'}} because..."></textarea>
+            </div>
+            
+            <div class="pt-4 border-t border-slate-100 flex gap-4">
+              <button (click)="exportToPdf()" class="flex-1 bg-white border border-slate-300 text-slate-700 font-bold py-3 rounded-xl hover:bg-slate-50 flex items-center justify-center gap-2"><span>Download PDF</span></button>
+              <button (click)="submitRound()" [disabled]="!decision() || affPoints() === negPoints()" [class.opacity-50]="!decision() || affPoints() === negPoints()" class="flex-[2] bg-slate-900 text-white font-bold py-3 rounded-xl hover:bg-slate-800 flex items-center justify-center gap-3 shadow-lg transition-all">{{ isUpdate ? 'Update Ballot' : 'Submit Ballot' }}</button>
+            </div>
           </div>
-        </div>
-        <div>
-          <label class="block text-xs font-bold text-slate-500 uppercase mb-2">Reason for Decision (RFD)</label>
-          <textarea [(ngModel)]="rfdText" class="w-full h-32 border border-slate-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-blue-500 shadow-sm resize-none" placeholder="I voted for the {{decision() || '...'}} because..."></textarea>
-        </div>
-        <div class="pt-4 border-t border-slate-100 flex gap-4">
-          <button (click)="exportToPdf()" class="flex-1 bg-white border border-slate-300 text-slate-700 font-bold py-3 rounded-xl hover:bg-slate-50 flex items-center justify-center gap-2"><span>Download PDF</span></button>
-          <button (click)="submitRound()" [disabled]="!decision() || affPoints() === negPoints()" [class.opacity-50]="!decision() || affPoints() === negPoints()" class="flex-[2] bg-slate-900 text-white font-bold py-3 rounded-xl hover:bg-slate-800 flex items-center justify-center gap-3 shadow-lg transition-all"><span>Submit Ballot to Cloud</span></button>
-        </div>
-        <p *ngIf="affPoints() === negPoints()" class="text-xs text-center text-red-500 mt-2 font-bold">Points cannot be tied in Lincoln-Douglas debate.</p>
       </div>
     </div>
   \`
@@ -748,15 +693,38 @@ export class BallotComponent {
   negPoints = signal(28);
   decision = signal<'Aff' | 'Neg' | null>(null);
   rfdText = ''; 
+  isUpdate = false;
 
   constructor() {
     effect(() => {
-      this.tournament.activeDebateId();
-      setTimeout(() => this.resetBallot(), 0);
+      const debateId = this.tournament.activeDebateId();
+      const userId = this.tournament.userProfile()?.id;
+      
+      // Check if we have an existing result to load
+      if (debateId && userId) {
+          const existing = this.tournament.results().find(r => r.debateId === debateId && r.judgeId === userId);
+          if (existing) {
+              this.isUpdate = true;
+              this.affPoints.set(existing.affScore);
+              this.negPoints.set(existing.negScore);
+              this.decision.set(existing.decision);
+              this.rfdText = existing.rfd;
+          } else {
+              this.resetBallot();
+          }
+      }
     }, { allowSignalWrites: true });
   }
 
+  isDebater() { return this.tournament.userRole() === 'Debater'; }
+
+  getFeedback() {
+    const debateId = this.tournament.activeDebateId();
+    return this.tournament.results().filter(r => r.debateId === debateId);
+  }
+
   resetBallot() {
+    this.isUpdate = false;
     this.affPoints.set(28);
     this.negPoints.set(28);
     this.decision.set(null);
@@ -766,12 +734,13 @@ export class BallotComponent {
   submitRound() {
     if (!this.decision()) return;
     const debateId = this.tournament.activeDebateId();
-    if (!debateId) { alert("Error: No active debate found."); return; }
+    if (!debateId) return;
     this.tournament.submitBallot(debateId, {
       affScore: this.affPoints(), negScore: this.negPoints(), decision: this.decision()!, rfd: this.rfdText
     }).then(() => {
-      alert("Ballot Submitted Successfully!");
-      this.tournament.activeDebateId.set(null);
+      alert(this.isUpdate ? "Ballot Updated!" : "Ballot Submitted!");
+      // Keep them on the page to edit if needed
+      this.isUpdate = true;
     });
   }
 
@@ -794,162 +763,6 @@ export class BallotComponent {
 }`
   },
   {
-    path: 'src/app/flow.component.ts',
-    content: `import { Component, signal, effect, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
-import { FormsModule } from '@angular/forms';
-import { TermComponent } from './term.component';
-import { TournamentService } from './tournament.service';
-
-export interface DebateArgument {
-  id: string; text: string; colIdx: number; status: 'open' | 'addressed' | 'dropped'; parentId: string | null; isVoter?: boolean;
-}
-interface ColumnDef { id: string; name: string; isCx: boolean; }
-interface FrameworkData { value: string; criterion: string; }
-
-@Component({
-  selector: 'app-flow',
-  standalone: true,
-  imports: [CommonModule, FormsModule, TermComponent],
-  template: \`
-    <div id="debate-flow" class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 h-full flex flex-col">
-      <div class="mb-4 flex items-center justify-between">
-        <div>
-          <h2 class="font-bold text-slate-700">Interactive Flow Sheet</h2>
-          <p class="text-xs text-slate-500">Star <span class="text-purple-600 font-bold">★ Voting Issues</span> to track winning arguments.</p>
-        </div>
-        <button (click)="resetFlow()" class="text-xs text-red-400 hover:text-red-600 underline">Clear All</button>
-      </div>
-      <div class="flex-1 overflow-x-auto pb-12" (click)="closeMenus()"> 
-        <div class="flex h-full min-w-max divide-x divide-slate-200 border border-slate-200 rounded-lg bg-slate-50">
-          <div *ngFor="let col of columns; let i = index" class="flex flex-col group transition-all" [ngClass]="col.isCx ? 'w-64 bg-amber-50/50' : 'w-80 bg-slate-50'">
-            <div class="p-3 text-center text-xs font-bold uppercase tracking-wider border-b border-slate-200 sticky top-0 z-20 shadow-sm" [ngClass]="col.isCx ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-600'">{{ col.name }}</div>
-            <div class="flex-1 p-2 space-y-3 overflow-y-auto min-h-[400px]">
-              <div *ngIf="['1AC', '1NC'].includes(col.id)" class="mb-4 p-3 rounded-lg border-2 border-dashed border-indigo-200 bg-indigo-50/50">
-                <div class="text-[10px] font-bold text-indigo-400 uppercase tracking-widest mb-2 text-center">Framework</div>
-                <div class="flex items-center gap-2 mb-2">
-                  <span class="text-xs font-bold text-indigo-700 w-16 text-right"><app-term lookup="Value Premise">Value</app-term>:</span>
-                  <input type="text" [(ngModel)]="frameworks()[col.id].value" (ngModelChange)="saveData()" placeholder="e.g. Justice" class="flex-1 text-sm font-bold text-indigo-900 bg-white border border-indigo-100 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                </div>
-                <div class="flex items-center gap-2">
-                  <span class="text-xs font-bold text-indigo-700 w-16 text-right"><app-term lookup="Value Criterion">Criterion</app-term>:</span>
-                  <input type="text" [(ngModel)]="frameworks()[col.id].criterion" (ngModelChange)="saveData()" placeholder="e.g. Social Welfare" class="flex-1 text-sm font-medium text-indigo-800 bg-white border border-indigo-100 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                </div>
-              </div>
-              <div *ngFor="let arg of getArgsForCol(i)" class="relative p-3 rounded-lg border shadow-sm transition-all group/card" [ngClass]="{'bg-purple-50 border-purple-300 ring-1 ring-purple-200 shadow-md': arg.isVoter, 'bg-green-50 border-green-200 opacity-70': !arg.isVoter && arg.status === 'addressed', 'bg-red-50 border-red-200': !arg.isVoter && arg.status === 'dropped', 'bg-white border-slate-200': !arg.isVoter && arg.status === 'open'}">
-                <div *ngIf="isLinkedToPrevious(arg)" class="absolute -left-3 top-4 w-3 h-[2px] bg-slate-300"></div>
-                <div *ngIf="editingId() !== arg.id" (click)="editArg(arg.id, $event)" class="text-sm text-slate-800 whitespace-pre-wrap cursor-text min-h-[1.5rem]">{{ arg.text }}</div>
-                <textarea *ngIf="editingId() === arg.id" [(ngModel)]="arg.text" (blur)="stopEditing()" (click)="$event.stopPropagation()" (keydown.enter)="$event.preventDefault(); stopEditing()" class="w-full text-sm p-1 border rounded focus:ring-2 focus:ring-blue-500 bg-white" autoFocus></textarea>
-                <div class="mt-2 flex justify-between items-center opacity-0 group-hover/card:opacity-100 transition-opacity">
-                  <div class="flex gap-1 items-center">
-                    <button (click)="setDrop(arg); $event.stopPropagation()" title="Drop" class="p-1 hover:text-red-600 text-slate-400"><span class="font-bold text-xs">✕</span></button>
-                    <button (click)="setAddressed(arg); $event.stopPropagation()" title="Address" class="p-1 hover:text-green-600 text-slate-400"><span class="font-bold text-xs">✓</span></button>
-                    <div class="w-px h-3 bg-slate-200 mx-1"></div>
-                    <button (click)="toggleVoter(arg); $event.stopPropagation()" class="p-1 transition-colors" [class]="arg.isVoter ? 'text-purple-600' : 'text-slate-300 hover:text-purple-500'"><svg xmlns="[http://www.w3.org/2000/svg](http://www.w3.org/2000/svg)" viewBox="0 0 24 24" fill="currentColor" class="w-4 h-4"><path fill-rule="evenodd" d="M10.788 3.21c.448-1.077 1.976-1.077 2.424 0l2.082 5.007 5.404.433c1.164.093 1.636 1.545.749 2.305l-4.117 3.527 1.257 5.273c.271 1.136-.964 2.033-1.96 1.425L12 18.354 7.373 21.18c-.996.608-2.231-.29-1.96-1.425l1.257-5.273-4.117-3.527c-.887-.76-.415-2.212.749-2.305l5.404-.433 2.082-5.006z" clip-rule="evenodd" /></svg></button>
-                    <div class="w-px h-3 bg-slate-200 mx-1"></div>
-                    <button (click)="deleteArg(arg); $event.stopPropagation()" title="Delete" class="p-1 hover:text-slate-600 text-slate-300"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>
-                  </div>
-                  <div class="relative">
-                    <button *ngIf="i < columns.length - 1" (click)="toggleLinkMenu(arg.id, $event)" class="text-xs px-2 py-1 rounded border font-medium flex items-center gap-1 transition-colors" [ngClass]="col.isCx ? 'bg-amber-100 text-amber-700 border-amber-200 hover:bg-amber-200' : 'bg-blue-50 text-blue-600 border-blue-100 hover:bg-blue-100'">Link ⤵</button>
-                     <div *ngIf="activeLinkId() === arg.id" (click)="$event.stopPropagation()" class="absolute right-0 top-full mt-1 w-36 bg-white rounded shadow-lg border border-slate-200 z-50 flex flex-col py-1">
-                      <button *ngFor="let target of getFutureColumns(i)" (click)="createLink(arg, target.idx)" class="text-left px-3 py-1.5 text-xs text-slate-700 hover:bg-blue-50 hover:text-blue-700 w-full">{{ target.name }}</button>
-                    </div>
-                  </div>
-                </div>
-                <div *ngIf="arg.status === 'dropped' && !arg.isVoter" class="absolute -top-2 -right-2 bg-red-500 text-white text-[10px] px-2 py-0.5 rounded-full font-bold shadow-sm z-10">DROP</div>
-                <div *ngIf="arg.isVoter" class="absolute -top-2 -right-2 bg-purple-600 text-white text-[10px] px-2 py-0.5 rounded-full font-bold shadow-sm z-10 flex items-center gap-1"><span>★</span> VOTER</div>
-              </div>
-              <div class="mt-2"><input type="text" [placeholder]="col.isCx ? '+ Note Admission...' : '+ New Point...'" (keydown.enter)="addArg($event, i)" class="w-full text-xs p-2 bg-transparent border border-dashed border-slate-300 rounded hover:bg-white focus:ring-2 focus:ring-blue-500 transition-all"></div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  \`
-})
-export class FlowComponent {
-  tournament = inject(TournamentService);
-  columns: ColumnDef[] = [
-    { id: '1AC', name: '1. Affirmative Constructive', isCx: false },
-    { id: 'CX1', name: 'Cross-Ex (Neg Questions)', isCx: true },
-    { id: '1NC', name: '2. Negative Constructive', isCx: false },
-    { id: 'CX2', name: 'Cross-Ex (Aff Questions)', isCx: true },
-    { id: '1AR', name: '3. 1st Affirmative Rebuttal', isCx: false },
-    { id: '2NR', name: '4. Negative Rebuttal', isCx: false },
-    { id: '2AR', name: '5. 2nd Affirmative Rebuttal', isCx: false }
-  ];
-  arguments = signal<DebateArgument[]>([]);
-  frameworks = signal<Record<string, FrameworkData>>({ '1AC': { value: '', criterion: '' }, '1NC': { value: '', criterion: '' } });
-  editingId = signal<string | null>(null);
-  activeLinkId = signal<string | null>(null);
-
-  constructor() {
-    this.loadData();
-    effect(() => {
-      localStorage.setItem('ld-flow-args', JSON.stringify(this.arguments()));
-      localStorage.setItem('ld-flow-frameworks', JSON.stringify(this.frameworks()));
-    });
-    effect(() => {
-      const activeId = this.tournament.activeDebateId();
-      const lastDebateId = localStorage.getItem('ld-current-debate-id');
-      if (activeId !== lastDebateId) {
-        this.internalReset();
-        if (activeId) localStorage.setItem('ld-current-debate-id', activeId);
-        else localStorage.removeItem('ld-current-debate-id');
-      }
-    }, { allowSignalWrites: true });
-  }
-
-  internalReset() {
-    this.arguments.set([]);
-    this.frameworks.set({ '1AC': { value: '', criterion: '' }, '1NC': { value: '', criterion: '' } });
-    this.editingId.set(null); this.activeLinkId.set(null);
-    localStorage.setItem('ld-flow-args', '[]');
-    localStorage.setItem('ld-flow-frameworks', JSON.stringify(this.frameworks()));
-  }
-
-  loadData() {
-    try {
-      const savedArgs = localStorage.getItem('ld-flow-args');
-      const savedFrames = localStorage.getItem('ld-flow-frameworks');
-      if (savedArgs) this.arguments.set(JSON.parse(savedArgs));
-      if (savedFrames) this.frameworks.set(JSON.parse(savedFrames));
-    } catch(e) { this.arguments.set([]); }
-  }
-
-  saveData() { localStorage.setItem('ld-flow-frameworks', JSON.stringify(this.frameworks())); }
-  toggleVoter(arg: DebateArgument) { this.arguments.update(args => args.map(a => a.id === arg.id ? { ...a, isVoter: !a.isVoter } : a)); }
-  createLink(originalArg: DebateArgument, targetIdx: number) { 
-    this.updateArgStatus(originalArg.id, 'addressed');
-    const isSkip = targetIdx > originalArg.colIdx + 1;
-    const sourceName = this.columns[originalArg.colIdx].id; 
-    const sourceIsCx = this.columns[originalArg.colIdx].isCx;
-    let prefix = 'Ref:';
-    if (sourceIsCx) prefix = 'Grant in CX:'; else if (isSkip) prefix = \`Ref (\${sourceName}):\`;
-    this.arguments.update(args => [...args, { id: crypto.randomUUID(), text: \`\${prefix} "\${originalArg.text.substring(0, 15)}..."\`, colIdx: targetIdx, status: 'open', parentId: originalArg.id, isVoter: false }]);
-    this.activeLinkId.set(null);
-  }
-  addArg(event: any, colIdx: number) { 
-    const text = event.target.value.trim();
-    if (!text) return;
-    this.arguments.update(args => [...args, { id: crypto.randomUUID(), text, colIdx, status: 'open', parentId: null, isVoter: false }]);
-    event.target.value = '';
-  }
-  getArgsForCol(idx: number) { return this.arguments().filter(a => a.colIdx === idx); }
-  getFutureColumns(currentIdx: number) { return this.columns.map((col, idx) => ({ name: col.id, isCx: col.isCx, idx })).filter(c => c.idx > currentIdx); }
-  isLinkedToPrevious(arg: DebateArgument): boolean { if (!arg.parentId) return false; const parent = this.arguments().find(a => a.id === arg.parentId); return parent ? (arg.colIdx === parent.colIdx + 1) : false; }
-  toggleLinkMenu(id: string, e: Event) { e.stopPropagation(); this.activeLinkId.set(this.activeLinkId() === id ? null : id); }
-  closeMenus() { this.activeLinkId.set(null); }
-  deleteArg(arg: DebateArgument) { if (confirm('Delete note?')) this.arguments.update(args => args.filter(a => a.id !== arg.id)); }
-  setDrop(arg: DebateArgument) { this.updateArgStatus(arg.id, 'dropped'); }
-  setAddressed(arg: DebateArgument) { this.updateArgStatus(arg.id, 'addressed'); }
-  updateArgStatus(id: string, status: any) { this.arguments.update(args => args.map(a => a.id === id ? { ...a, status } : a)); }
-  editArg(id: string, e: Event) { e.stopPropagation(); this.editingId.set(id); }
-  stopEditing() { this.editingId.set(null); }
-  resetFlow() { if(confirm('Clear all notes?')) this.internalReset(); }
-}`
-  },
-  {
     path: 'src/app/app.component.ts',
     content: `import { Component, signal, inject, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
@@ -969,7 +782,6 @@ import { TournamentService } from './tournament.service';
     <app-login *ngIf="!tournament.userProfile()" />
     <div *ngIf="tournament.userProfile()" class="min-h-screen bg-slate-50">
       
-      <!-- HEADER with Logout -->
       <header *ngIf="!isAdmin()" class="bg-white border-b border-slate-200 px-6 py-3 flex justify-between items-center sticky top-0 z-50">
         <div class="flex items-center gap-2">
           <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold">DM</div>
@@ -983,56 +795,41 @@ import { TournamentService } from './tournament.service';
             <div class="font-bold text-slate-700">{{ tournament.userProfile()?.name }}</div>
             <div class="text-slate-400" *ngIf="isDebater()">Record: {{ getMyRecord().wins }}W - {{ getMyRecord().losses }}L</div>
           </div>
-          <button (click)="tournament.logout()" class="text-xs font-bold text-red-500 hover:bg-red-50 px-3 py-2 rounded transition-colors">
-            Log Out
-          </button>
+          <button (click)="tournament.logout()" class="text-xs font-bold text-red-500 hover:bg-red-50 px-3 py-2 rounded transition-colors" aria-label="Log Out">Log Out</button>
         </div>
       </header>
 
-      <!-- ADMIN VIEW -->
       <app-admin *ngIf="isAdmin()" />
 
-      <!-- DEBATER VIEW -->
-      <div *ngIf="isDebater()" class="p-8 max-w-4xl mx-auto">
-        <div class="bg-white p-8 rounded-2xl shadow-sm border border-slate-200 text-center">
-          <div class="w-20 h-20 bg-purple-100 text-purple-600 rounded-full flex items-center justify-center text-3xl font-bold mx-auto mb-4">
-            {{ tournament.userProfile()?.name?.charAt(0) }}
-          </div>
-          <h2 class="text-2xl font-bold text-slate-800">Welcome, {{ tournament.userProfile()?.name }}</h2>
-          <p class="text-slate-500 mb-6">You are registered as a Debater.</p>
-          
-          <div class="grid grid-cols-2 gap-4 max-w-sm mx-auto mb-8">
-            <div class="bg-green-50 p-4 rounded-xl border border-green-100">
-              <div class="text-2xl font-bold text-green-600">{{ getMyRecord().wins }}</div>
-              <div class="text-xs font-bold text-green-800 uppercase">Wins</div>
-            </div>
-            <div class="bg-red-50 p-4 rounded-xl border border-red-100">
-              <div class="text-2xl font-bold text-red-600">{{ getMyRecord().losses }}</div>
-              <div class="text-xs font-bold text-red-800 uppercase">Losses</div>
-            </div>
-          </div>
-
-          <div class="text-sm text-slate-400 italic">
-            Wait for the administrator to pair you in a round.<br>
-            Your results will appear here automatically.
-          </div>
-        </div>
-      </div>
-
-      <!-- JUDGE VIEW -->
-      <div *ngIf="isJudge()" class="h-[calc(100vh-64px)] flex flex-col">
+      <!-- DEBATER / JUDGE VIEW -->
+      <div *ngIf="!isAdmin()" class="h-[calc(100vh-64px)] flex flex-col">
         
-        <!-- B1. JUDGE DASHBOARD (Select Round) -->
+        <!-- Dashboard -->
         <div *ngIf="!tournament.activeDebateId()" class="p-8 max-w-4xl mx-auto w-full">
-          <h2 class="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">Your Assignments</h2>
+          <!-- Debater Stats Panel -->
+          <div *ngIf="isDebater()" class="bg-white p-6 rounded-xl shadow-sm border border-slate-200 mb-8 flex items-center justify-around">
+              <div class="text-center">
+                 <div class="text-3xl font-bold text-green-600">{{ getMyRecord().wins }}</div>
+                 <div class="text-xs font-bold text-slate-400 uppercase">Wins</div>
+              </div>
+              <div class="h-12 w-px bg-slate-100"></div>
+              <div class="text-center">
+                 <div class="text-3xl font-bold text-red-600">{{ getMyRecord().losses }}</div>
+                 <div class="text-xs font-bold text-slate-400 uppercase">Losses</div>
+              </div>
+          </div>
+
+          <h2 class="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">
+            {{ isDebater() ? 'Your Debates' : 'Judge Assignments' }}
+          </h2>
           
           <div class="grid gap-4">
             <div *ngFor="let debate of tournament.getMyAssignments()" 
                  (click)="tournament.activeDebateId.set(debate.id)"
                  class="bg-white p-6 rounded-xl shadow-sm border border-slate-200 hover:border-blue-400 hover:shadow-md cursor-pointer transition-all group">
               <div class="flex justify-between">
-                <span class="bg-slate-800 text-white text-xs font-bold px-2 py-1 rounded">OPEN ROUND</span>
-                <span class="text-xs text-slate-400 group-hover:text-blue-600">Click to Start &rarr;</span>
+                <span class="bg-slate-800 text-white text-xs font-bold px-2 py-1 rounded">ENTER ROUND</span>
+                <span class="text-xs text-slate-400 group-hover:text-blue-600">Click to Open &rarr;</span>
               </div>
               <h3 class="text-xl font-bold text-slate-800 mt-3 mb-2">{{ debate.topic }}</h3>
               <div class="flex items-center gap-4 text-sm text-slate-600">
@@ -1040,26 +837,43 @@ import { TournamentService } from './tournament.service';
                 <div class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-red-500"></span> <strong>Neg:</strong> {{ debate.negName }}</div>
               </div>
             </div>
-
             <div *ngIf="tournament.getMyAssignments().length === 0" class="text-center py-12 border-2 border-dashed border-slate-200 rounded-xl">
-              <p class="text-slate-400">No debates assigned.</p>
-              <p class="text-xs text-slate-300 mt-1">Please wait for the administrator.</p>
+              <p class="text-slate-400">No debates found.</p>
+              <p class="text-xs text-slate-300 mt-1">Wait for the administrator to match you.</p>
             </div>
           </div>
+          
+          <!-- Debater Feedback Section -->
+          <div *ngIf="isDebater()" class="mt-8">
+             <h2 class="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">Past Ballots & Feedback</h2>
+             <div class="space-y-4">
+                <div *ngFor="let res of getMyBallots()" class="bg-slate-50 p-4 rounded border border-slate-200">
+                   <div class="flex justify-between text-xs font-bold mb-2">
+                       <span class="text-slate-600">Judge: {{ res.judgeName }}</span>
+                       <span [class.text-blue-600]="res.decision === 'Aff'" [class.text-red-600]="res.decision === 'Neg'">Vote: {{ res.decision }}</span>
+                   </div>
+                   <p class="text-sm text-slate-600 italic">"{{ res.rfd }}"</p>
+                </div>
+                <div *ngIf="getMyBallots().length === 0" class="text-xs text-slate-400 italic">No feedback received yet.</div>
+             </div>
+          </div>
+
         </div>
 
-        <!-- B2. JUDGING INTERFACE (Timer/Flow/Ballot) -->
+        <!-- Active Round View -->
         <div *ngIf="tournament.activeDebateId()" class="flex flex-col h-full overflow-hidden">
           <app-timer class="flex-none" />
           <div class="bg-slate-100 px-4 py-1 text-xs text-center border-b border-slate-200 flex justify-between items-center">
-             <span class="font-bold text-slate-600">Judging: {{ getCurrentDebate()?.topic }}</span>
+             <span class="font-bold text-slate-600">Topic: {{ getCurrentDebate()?.topic }}</span>
              <button (click)="tournament.activeDebateId.set(null)" class="text-red-500 hover:underline">Exit Round</button>
           </div>
           <main class="flex-1 p-4 overflow-hidden relative"><app-flow class="h-full block" /></main>
           <footer class="bg-white border-t border-slate-200 p-2 flex-none z-40">
             <div class="max-w-7xl mx-auto flex justify-between items-center">
               <div class="text-xs text-slate-400"><strong>DebateMate</strong> 2025</div>
-              <button (click)="showBallot.set(!showBallot())" class="px-6 py-2 bg-slate-900 text-white font-bold rounded-lg hover:bg-slate-800 transition-all">{{ showBallot() ? 'Hide Ballot' : 'Score Round' }}</button>
+              <button (click)="showBallot.set(!showBallot())" class="px-6 py-2 bg-slate-900 text-white font-bold rounded-lg hover:bg-slate-800 transition-all">
+                {{ isDebater() ? 'View Feedback' : 'Score Round' }}
+              </button>
             </div>
             <div *ngIf="showBallot()" class="border-t border-slate-100 mt-2 p-4 bg-slate-50 max-h-[60vh] overflow-y-auto"><div class="max-w-3xl mx-auto"><app-ballot /></div></div>
           </footer>
@@ -1079,6 +893,17 @@ export class AppComponent {
 
   getCurrentDebate() { return this.tournament.debates().find(d => d.id === this.tournament.activeDebateId()); }
   getMyRecord() { return this.tournament.getMyDebaterRecord(); }
+
+  getMyBallots() {
+    const uid = this.tournament.userProfile()?.id;
+    if (!uid) return [];
+    // Find all debates where I was a participant
+    const myDebateIds = this.tournament.debates()
+        .filter(d => d.affId === uid || d.negId === uid)
+        .map(d => d.id);
+    
+    return this.tournament.results().filter(r => myDebateIds.includes(r.debateId));
+  }
 }`
   }
 ];

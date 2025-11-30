@@ -15,5 +15,4 @@ DebateMate is a real-time Lincoln-Douglas adjudication system. It features a tri
 ## 🚀 Getting Started
 1.  **Install:** `npm install`
 2.  **Run:** `npm start`
-3.  **Login:** * **Debaters:** Log in first so your name appears in the Admin's list.
-    * **Admin:** Log in to see the "Registered Debaters" list and create matches.
+3.  **Login:** Users must be logged in to appear in the Administrator's lists.

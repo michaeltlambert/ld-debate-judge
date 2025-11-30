@@ -2,7 +2,7 @@ import { Injectable, signal, computed } from '@angular/core';
 import { initializeApp } from 'firebase/app';
 import { 
   getFirestore, collection, doc, addDoc, updateDoc, 
-  onSnapshot, setDoc
+  onSnapshot, setDoc, deleteDoc
 } from 'firebase/firestore';
 import { 
   getAuth, signInAnonymously, onAuthStateChanged, 
@@ -13,9 +13,9 @@ import {
 export interface Debate {
   id: string;
   topic: string;
-  affId: string; // Debater UID
+  affId: string;
   affName: string;
-  negId: string; // Debater UID
+  negId: string;
   negName: string;
   judgeIds: string[]; 
   status: 'Open' | 'Closed';
@@ -50,11 +50,8 @@ export interface DebaterStats {
 export class TournamentService {
   user = signal<User | null>(null);
   userProfile = signal<UserProfile | null>(null);
-  
-  // FIX: Explicitly added userRole signal
   userRole = signal<'Admin' | 'Judge' | 'Debater'>('Debater');
   
-  // Collections
   judges = signal<UserProfile[]>([]);
   debaters = signal<UserProfile[]>([]);
   debates = signal<Debate[]>([]);
@@ -62,33 +59,21 @@ export class TournamentService {
   
   activeDebateId = signal<string | null>(null);
 
-  // Computed Standings (Leaderboard)
   standings = computed(() => {
     const stats: Record<string, DebaterStats> = {};
-    
-    // Initialize stats for all registered debaters
     this.debaters().forEach(d => {
       stats[d.id] = { id: d.id, name: d.name, wins: 0, losses: 0 };
     });
-
-    // Calculate based on Results + Debate Link
     this.results().forEach(r => {
       const debate = this.debates().find(d => d.id === r.debateId);
       if (debate) {
-        // Ensure stats objects exist (in case debater deleted but record remains)
         if (!stats[debate.affId]) stats[debate.affId] = { id: debate.affId, name: debate.affName, wins: 0, losses: 0 };
         if (!stats[debate.negId]) stats[debate.negId] = { id: debate.negId, name: debate.negName, wins: 0, losses: 0 };
 
-        if (r.decision === 'Aff') {
-          stats[debate.affId].wins++;
-          stats[debate.negId].losses++;
-        } else {
-          stats[debate.negId].wins++;
-          stats[debate.affId].losses++;
-        }
+        if (r.decision === 'Aff') { stats[debate.affId].wins++; stats[debate.negId].losses++; }
+        else { stats[debate.negId].wins++; stats[debate.affId].losses++; }
       }
     });
-
     return Object.values(stats).sort((a, b) => b.wins - a.wins);
   });
 
@@ -99,12 +84,13 @@ export class TournamentService {
 
   // --- CONFIGURATION ---
   private firebaseConfig = {
-    apiKey: "YOUR_API_KEY",
-    authDomain: "YOUR_PROJECT.firebaseapp.com",
-    projectId: "YOUR_PROJECT_ID",
-    storageBucket: "YOUR_PROJECT.appspot.com",
-    messagingSenderId: "...",
-    appId: "..."
+	apiKey: "AIzaSyCtRIJNfTDdYJ4yQ4t2NK3IP2fZAs5O238",
+	authDomain: "ld-debate-judge.firebaseapp.com",
+	projectId: "ld-debate-judge",
+	storageBucket: "ld-debate-judge.firebasestorage.app",
+	messagingSenderId: "1031465191804",
+	appId: "1:1031465191804:web:d80147a650f0cad4c77cf9",
+	measurementId: "G-LY6JZCHPVZ"
   };
 
   constructor() {
@@ -149,59 +135,61 @@ export class TournamentService {
     const savedRole = localStorage.getItem('debate-user-role') as any;
 
     if (savedName && savedRole) {
-      this.userRole.set(savedRole); // Update role signal
+      this.userRole.set(savedRole);
       this.userProfile.set({ id: uid, name: savedName, role: savedRole, isOnline: true });
+      // Re-establish presence in DB on refresh
+      this.updateCloudProfile(uid, savedName, savedRole);
     }
   }
 
   private startListeners() {
     if (!this.db) return;
-    
-    const judgesRef = this.getCollection('judges');
-    onSnapshot(judgesRef, (snap) => {
-      this.judges.set(snap.docs.map(d => ({ id: d.id, ...d.data() } as UserProfile)));
-    });
-
-    const debatersRef = this.getCollection('debaters');
-    onSnapshot(debatersRef, (snap) => {
-      this.debaters.set(snap.docs.map(d => ({ id: d.id, ...d.data() } as UserProfile)));
-    });
-
-    const debatesRef = this.getCollection('debates');
-    onSnapshot(debatesRef, (snap) => {
-      this.debates.set(snap.docs.map(d => ({ id: d.id, ...d.data() } as Debate)));
-    });
-
-    const resultsRef = this.getCollection('results');
-    onSnapshot(resultsRef, (snap) => {
-      this.results.set(snap.docs.map(d => ({ id: d.id, ...d.data() } as RoundResult)));
-    });
+    onSnapshot(this.getCollection('judges'), (s) => this.judges.set(s.docs.map(d => ({id:d.id, ...d.data()} as UserProfile))));
+    onSnapshot(this.getCollection('debaters'), (s) => this.debaters.set(s.docs.map(d => ({id:d.id, ...d.data()} as UserProfile))));
+    onSnapshot(this.getCollection('debates'), (s) => this.debates.set(s.docs.map(d => ({id:d.id, ...d.data()} as Debate))));
+    onSnapshot(this.getCollection('results'), (s) => this.results.set(s.docs.map(d => ({id:d.id, ...d.data()} as RoundResult))));
   }
   
   async setProfile(name: string, role: 'Admin' | 'Judge' | 'Debater') {
-    const uid = this.user()?.uid || 'demo-' + Math.random();
+    let currentUser = this.user();
+    if (!currentUser && this.auth) currentUser = this.auth.currentUser;
     
-    this.userRole.set(role); // Update role signal
+    const uid = currentUser?.uid || 'demo-' + Math.random().toString(36).substring(7);
     
+    this.userRole.set(role);
     const profile: UserProfile = { id: uid, name, role, isOnline: true };
 
     localStorage.setItem('debate-user-name', name);
     localStorage.setItem('debate-user-role', role);
     
-    if (this.db && this.user()) {
+    this.userProfile.set(profile);
+    this.updateCloudProfile(uid, name, role);
+  }
+
+  private async updateCloudProfile(uid: string, name: string, role: string) {
+    if (this.db) {
       try {
         const collectionName = role === 'Debater' ? 'debaters' : (role === 'Judge' ? 'judges' : null);
         if (collectionName) {
-          const ref = doc(this.db, 'artifacts', this.appId, 'public', 'data', collectionName, profile.id);
-          await setDoc(ref, profile);
+          const ref = doc(this.db, 'artifacts', this.appId, 'public', 'data', collectionName, uid);
+          await setDoc(ref, { id: uid, name, role, isOnline: true }, { merge: true });
         }
-      } catch (e) { console.warn('Offline mode: Profile not saved to cloud'); }
+      } catch (e) { console.warn('Cloud sync failed', e); }
     }
-    
-    this.userProfile.set(profile);
   }
 
   async logout() {
+    // Clean up presence from DB so Admin knows user is gone
+    const profile = this.userProfile();
+    if (profile && this.db) {
+        const collectionName = profile.role === 'Debater' ? 'debaters' : (profile.role === 'Judge' ? 'judges' : null);
+        if (collectionName) {
+             try {
+                await deleteDoc(doc(this.db, 'artifacts', this.appId, 'public', 'data', collectionName, profile.id));
+             } catch(e) { console.warn('Logout cleanup failed', e); }
+        }
+    }
+
     if (this.auth) await signOut(this.auth);
     localStorage.removeItem('debate-user-name');
     localStorage.removeItem('debate-user-role');
@@ -215,8 +203,15 @@ export class TournamentService {
         this.debates.update(d => [...d, { id: 'loc-'+Date.now(), topic, affId, affName, negId, negName, judgeIds:[], status:'Open' }]);
         return;
     }
-    const ref = this.getCollection('debates');
-    await addDoc(ref, { topic, affId, affName, negId, negName, judgeIds: [], status: 'Open' });
+    await addDoc(this.getCollection('debates'), { topic, affId, affName, negId, negName, judgeIds: [], status: 'Open' });
+  }
+
+  async deleteDebate(debateId: string) {
+    if (!this.db) {
+        this.debates.update(d => d.filter(x => x.id !== debateId));
+        return;
+    }
+    await deleteDoc(doc(this.db, 'artifacts', this.appId, 'public', 'data', 'debates', debateId));
   }
 
   async assignJudge(debateId: string, judgeId: string) {

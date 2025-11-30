@@ -8,6 +8,11 @@ import { LoginComponent } from './login.component';
 import { AdminComponent } from './admin.component';
 import { TournamentService } from './tournament.service';
 
+/**
+ * Root Component.
+ * Acts as the main router between Login, Admin, and Judge/Debater views.
+ * Handles top-level layout and user session display.
+ */
 @Component({
   selector: 'app-root',
   standalone: true,
@@ -27,10 +32,11 @@ import { TournamentService } from './tournament.service';
         </div>
         <div class="flex items-center gap-4">
           <div class="text-xs text-right hidden sm:block">
+            <!-- Safe navigation to prevent "Object is possibly undefined" errors -->
             <div class="font-bold text-slate-700">{{ tournament.userProfile()?.name }}</div>
             <div class="text-slate-400" *ngIf="isDebater()">Record: {{ getMyRecord().wins }}W - {{ getMyRecord().losses }}L</div>
           </div>
-          <button (click)="tournament.logout()" class="text-xs font-bold text-red-500 hover:bg-red-50 px-3 py-2 rounded transition-colors">
+          <button (click)="tournament.logout()" class="text-xs font-bold text-red-500 hover:bg-red-50 px-3 py-2 rounded transition-colors" aria-label="Log Out">
             Log Out
           </button>
         </div>
