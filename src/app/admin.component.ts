@@ -1,7 +1,7 @@
 import { Component, inject, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { TournamentService, Debate, RoundType, RoundStage, UserProfile } from './tournament.service';
+import { TournamentService, Debate, RoundType, RoundStage, UserProfile, RoundResult } from './tournament.service';
 
 @Component({
   selector: 'app-admin',
@@ -27,6 +27,44 @@ import { TournamentService, Debate, RoundType, RoundStage, UserProfile } from '.
 
       <div *ngIf="tournament.isTournamentClosed()" class="max-w-7xl mx-auto bg-amber-50 border border-amber-200 p-4 rounded-lg mb-6 text-center text-amber-800 font-bold">
           This tournament is closed. All data is Read-Only.
+      </div>
+      
+      <!-- Ballot Modal -->
+      <div *ngIf="selectedBallot()" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" (click)="selectedBallot.set(null)">
+        <div class="bg-white rounded-xl shadow-2xl max-w-lg w-full p-6" (click)="$event.stopPropagation()">
+           <div class="flex justify-between items-start mb-4">
+              <div>
+                  <h3 class="text-lg font-bold text-slate-800">Ballot Details</h3>
+                  <p class="text-sm text-slate-500">Judge: {{ selectedBallot()?.judgeName }}</p>
+              </div>
+              <button (click)="selectedBallot.set(null)" class="text-slate-400 hover:text-slate-600">&times;</button>
+           </div>
+           
+           <div class="grid grid-cols-2 gap-4 mb-4">
+              <div class="p-3 rounded bg-blue-50 text-center border border-blue-100">
+                  <div class="text-xs font-bold text-blue-600 uppercase">Affirmative</div>
+                  <div class="text-2xl font-bold text-slate-800">{{ selectedBallot()?.affScore }}</div>
+              </div>
+              <div class="p-3 rounded bg-red-50 text-center border border-red-100">
+                  <div class="text-xs font-bold text-red-600 uppercase">Negative</div>
+                  <div class="text-2xl font-bold text-slate-800">{{ selectedBallot()?.negScore }}</div>
+              </div>
+           </div>
+           
+           <div class="mb-4">
+              <span class="text-xs font-bold uppercase tracking-wider text-slate-500">Decision</span>
+              <div class="font-bold text-lg" [ngClass]="selectedBallot()?.decision === 'Aff' ? 'text-blue-600' : 'text-red-600'">
+                  Voted for: {{ selectedBallot()?.decision }}
+              </div>
+           </div>
+
+           <div>
+              <span class="text-xs font-bold uppercase tracking-wider text-slate-500">Reason for Decision (RFD)</span>
+              <div class="mt-1 p-3 bg-slate-50 rounded border border-slate-200 text-sm text-slate-700 whitespace-pre-wrap max-h-60 overflow-y-auto">
+                  {{ selectedBallot()?.rfd || 'No written feedback provided.' }}
+              </div>
+           </div>
+        </div>
       </div>
 
       <main class="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8">
@@ -115,7 +153,10 @@ import { TournamentService, Debate, RoundType, RoundStage, UserProfile } from '.
                                 <span class="text-xs font-bold text-slate-700 flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-green-500"></span> {{ getJudgeName(judgeId) }}</span>
                                 <button *ngIf="debate.status === 'Open' && !tournament.isTournamentClosed()" (click)="remove(debate.id, judgeId)" class="text-slate-300 hover:text-red-500 font-bold text-xs" title="Unassign Judge">Remove</button>
                             </div>
-                            <div *ngIf="getResult(debate.id, judgeId) as res; else pending" class="animate-in fade-in bg-white p-2 rounded border border-slate-100 mt-2">
+                            <div *ngIf="getResult(debate.id, judgeId) as res; else pending" 
+                                 (click)="selectedBallot.set(res)"
+                                 class="animate-in fade-in bg-white p-2 rounded border border-slate-100 mt-2 cursor-pointer hover:border-blue-300 transition-colors hover:shadow-sm group/ballot"
+                                 title="Click to view full ballot">
                                 <div class="flex justify-between text-xs font-bold mb-1">
                                     <span [class.text-blue-600]="res.decision === 'Aff'" [class.text-red-600]="res.decision === 'Neg'">Voted: {{ res.decision }}</span>
                                 </div>
@@ -123,6 +164,7 @@ import { TournamentService, Debate, RoundType, RoundStage, UserProfile } from '.
                                      <div class="bg-blue-50 rounded px-1"><span class="text-[10px] font-bold text-blue-600">AFF</span><span class="text-sm font-bold text-slate-700 block leading-none">{{ res.affScore }}</span></div>
                                      <div class="bg-red-50 rounded px-1"><span class="text-[10px] font-bold text-red-600">NEG</span><span class="text-sm font-bold text-slate-700 block leading-none">{{ res.negScore }}</span></div>
                                 </div>
+                                <div class="text-[10px] text-slate-400 mt-1 text-center group-hover/ballot:text-blue-500">Click to view details</div>
                             </div>
                             <ng-template #pending>
                                 <div class="flex items-center justify-between w-full mt-2 pl-2">
@@ -162,6 +204,8 @@ export class AdminComponent {
   roundType: RoundType = 'Prelim';
   roundNumber = 1; 
   roundStage = 'Quarterfinals'; 
+  
+  selectedBallot = signal<RoundResult | null>(null);
   
   activeTab = signal<'Dashboard' | 'Bracket'>('Dashboard');
   bracketStages = ['Octofinals', 'Quarterfinals', 'Semifinals', 'Finals'];

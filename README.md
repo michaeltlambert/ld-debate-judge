@@ -1,15 +1,12 @@
 # DebateMate: Tournament Edition
 
 ## 📘 Project Overview
-DebateMate is a real-time Lincoln-Douglas adjudication system designed for high usability and strict tournament management.
+DebateMate is a real-time Lincoln-Douglas adjudication system.
 
 ### **Features**
-* **Multi-Tournament Architecture:** Admins can create, switch between, and archive multiple independent tournaments.
-* **Strict Authentication:** Secure Email/Password login with persistent user profiles.
-* **Real-Time Flow:** Judges and Debaters can track arguments and add comments live.
-* **Automated Scoring:** Ballots automatically determine the winner based on point totals.
-* **Tournament Brackets:** Visual tracking of elimination rounds.
-* **PDF Export:** Judges can download their flow and ballot for records.
+* **Multi-Tournament:** Admins can manage multiple events.
+* **Real-Time Flow:** Judges and Debaters can track arguments and add comments.
+* **Strict Scoring:** Ballots calculate winners automatically based on points.
 
 ## 🔧 Configuration
 Update `src/app/config.ts` with your API Keys.
