@@ -1,23 +1,18 @@
 # DebateMate: Tournament Edition
 
 ## 📘 Project Overview
-DebateMate is a real-time Lincoln-Douglas adjudication system.
+DebateMate is a real-time Lincoln-Douglas adjudication system designed for high usability and strict tournament management.
 
-### **New Features: Tournament Management**
-* **Admin Portal:** Central hub to create, view, and manage all tournaments.
-* **Auto-Codes:** Tournaments get a unique 6-digit code upon creation.
-* **Multi-Admin:** Any admin can administer any open tournament.
-* **Archive Mode:** Closed tournaments become read-only for historical review.
+### **Features**
+* **Multi-Tournament Architecture:** Admins can create, switch between, and archive multiple independent tournaments.
+* **Strict Authentication:** Secure Email/Password login with persistent user profiles.
+* **Real-Time Flow:** Judges and Debaters can track arguments and add comments live.
+* **Automated Scoring:** Ballots automatically determine the winner based on point totals.
+* **Tournament Brackets:** Visual tracking of elimination rounds.
+* **PDF Export:** Judges can download their flow and ballot for records.
 
-## 🔧 Configuration (Required)
-To fix "auth/operation-not-allowed" or "auth/unauthorized-domain":
-
-1.  Go to **Firebase Console > Authentication > Sign-in method**.
-    * Click **Add new provider** -> **Google** -> Toggle **Enable** -> **Save**.
-    * Click **Add new provider** -> **Facebook** -> Toggle **Enable** -> **Save**.
-2.  Go to **Authentication > Settings > Authorized domains**.
-    * Add `localhost` to the list.
-3.  Update `src/app/config.ts` with your API Keys.
+## 🔧 Configuration
+Update `src/app/config.ts` with your API Keys.
 
 ## 🚀 Getting Started
 1.  **Install:** `npm install`

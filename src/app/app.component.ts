@@ -40,14 +40,14 @@ import { TournamentService } from './tournament.service';
             </div>
             <div class="flex items-center gap-4">
               <!-- Profile Trigger -->
-              <button (click)="showProfile.set(true)" class="flex items-center gap-2 text-right hover:bg-slate-50 px-2 py-1 rounded transition-colors">
+              <button (click)="showProfile.set(true)" class="flex items-center gap-2 text-right hover:bg-slate-50 px-2 py-1 rounded transition-colors" title="View Profile">
                 <div class="hidden sm:block">
                    <div class="text-xs font-bold text-slate-700">{{ tournament.userProfile()?.name }}</div>
                    <div class="text-[10px] text-slate-400">View Profile</div>
                 </div>
                 <img [src]="tournament.userProfile()?.photoURL || 'https://ui-avatars.com/api/?name=' + tournament.userProfile()?.name" class="w-8 h-8 rounded-full border border-slate-200">
               </button>
-              <button (click)="tournament.logout()" class="text-xs font-bold text-red-500 hover:bg-red-50 px-3 py-2 rounded transition-colors" aria-label="Log Out">
+              <button (click)="tournament.logout()" class="text-xs font-bold text-red-500 hover:bg-red-50 px-3 py-2 rounded transition-colors" aria-label="Log Out" title="Log Out">
                 Log Out
               </button>
             </div>
@@ -55,7 +55,8 @@ import { TournamentService } from './tournament.service';
 
           <div *ngFor="let n of tournament.notifications()" class="bg-yellow-500 text-white px-4 py-2 text-center text-sm font-bold flex justify-between items-center sticky top-[60px] z-50 shadow-md animate-in slide-in-from-top">
              <div class="flex items-center gap-2 mx-auto"><span>🔔</span><span>{{ n.message }}</span></div>
-             <button (click)="tournament.dismissNotification(n.id)" class="hover:bg-yellow-600 p-1 rounded">&times;</button>
+             <button *ngIf="n.debateId" (click)="tournament.activeDebateId.set(n.debateId); tournament.dismissNotification(n.id)" class="bg-white text-yellow-600 px-2 py-0.5 rounded text-xs hover:bg-slate-100 ml-2" title="Go to debate round">Go to Round</button>
+             <button (click)="tournament.dismissNotification(n.id)" class="hover:bg-yellow-600 p-1 rounded" title="Dismiss notification">&times;</button>
           </div>
 
           <!-- ROUTING -->
@@ -88,13 +89,13 @@ import { TournamentService } from './tournament.service';
                   <app-timer class="flex-none" />
                   <div class="bg-slate-100 px-4 py-1 text-xs text-center border-b border-slate-200 flex justify-between items-center">
                      <span class="font-bold text-slate-600">Topic: {{ getCurrentDebate()?.topic }}</span>
-                     <button (click)="tournament.activeDebateId.set(null)" class="text-red-500 hover:underline">Exit Round</button>
+                     <button (click)="tournament.activeDebateId.set(null)" class="text-red-500 hover:underline" title="Return to Dashboard">Exit Round</button>
                   </div>
                   <main class="flex-1 p-4 overflow-hidden relative"><app-flow class="h-full block" /></main>
                   <footer class="bg-white border-t border-slate-200 p-2 flex-none z-40">
                     <div class="max-w-7xl mx-auto flex justify-between items-center">
                       <div class="text-xs text-slate-400"><strong>DebateMate</strong> 2025</div>
-                      <button (click)="showBallot.set(!showBallot())" class="px-6 py-2 bg-slate-900 text-white font-bold rounded-lg hover:bg-slate-800 transition-all">{{ isDebater() ? 'View Feedback' : 'Score Round' }}</button>
+                      <button (click)="showBallot.set(!showBallot())" class="px-6 py-2 bg-slate-900 text-white font-bold rounded-lg hover:bg-slate-800 transition-all" title="View/Edit Ballot">{{ isDebater() ? 'View Feedback' : 'Score Round' }}</button>
                     </div>
                     <div *ngIf="showBallot()" class="border-t border-slate-100 mt-2 p-4 bg-slate-50 max-h-[60vh] overflow-y-auto"><div class="max-w-3xl mx-auto"><app-ballot /></div></div>
                   </footer>

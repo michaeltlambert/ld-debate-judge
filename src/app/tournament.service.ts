@@ -6,8 +6,7 @@ import {
 } from 'firebase/firestore';
 import { 
   getAuth, signInAnonymously, onAuthStateChanged, 
-  User, signInWithCustomToken, signOut, GoogleAuthProvider, FacebookAuthProvider, 
-  signInWithPopup, signInWithRedirect, getRedirectResult,
+  User, signInWithCustomToken, signOut, 
   createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile
 } from 'firebase/auth';
 import { AppConfig } from './config';
@@ -41,7 +40,6 @@ export interface Debate {
 
 export interface UserProfile {
   id: string; 
-  // FIX: Allow null/undefined for users not yet in a tournament
   tournamentId?: string | null; 
   name: string;
   email?: string;
@@ -79,6 +77,7 @@ export interface Notification {
   tournamentId: string;
   recipientId: string;
   message: string;
+  debateId?: string;
   timestamp: number;
 }
 
@@ -97,10 +96,8 @@ export class TournamentService {
   results = signal<RoundResult[]>([]);
   notifications = signal<Notification[]>([]);
   
-  // Tournament Management
-  // FIX: Renamed from allTournaments to myTournaments to match component usage
+  // Admin: List of owned tournaments
   myTournaments = signal<TournamentMeta[]>([]);
-  
   currentTournamentStatus = computed(() => {
       const tid = this.tournamentId();
       return this.myTournaments().find(t => t.id === tid)?.status || 'Active';
@@ -140,6 +137,7 @@ export class TournamentService {
   private profileUnsubscribe: (() => void) | null = null;
   private notificationUnsubscribe: (() => void) | null = null;
   private tournamentUnsubscribe: (() => void) | null = null;
+  private collectionUnsubscribes: (() => void)[] = [];
 
   constructor() {
     this.appId = (window as any).__app_id || 'default-app';
@@ -161,17 +159,6 @@ export class TournamentService {
   }
 
   private async initAuth() {
-    try {
-      const redirectResult = await getRedirectResult(this.auth);
-      if (redirectResult?.user) {
-        this.user.set(redirectResult.user);
-        if (!this.restoreSession(redirectResult.user.uid)) {
-           this.recoverProfile(redirectResult.user.uid);
-        }
-        return;
-      }
-    } catch(e) { console.warn("Redirect Result check failed:", e); }
-
     const initialToken = (window as any).__initial_auth_token;
     if (initialToken && !this.auth.currentUser) await signInWithCustomToken(this.auth, initialToken);
 
@@ -185,6 +172,7 @@ export class TournamentService {
     });
   }
 
+  // --- AUTH METHODS ---
   async registerWithEmail(email: string, pass: string, name: string, role: any, tid: string | null) {
      if (!this.auth) {
          await this.setProfile(name, role, tid);
@@ -202,20 +190,6 @@ export class TournamentService {
   async loginWithEmail(email: string, pass: string) {
       if (!this.auth) throw new Error("Email Login requires Firebase config.");
       await signInWithEmailAndPassword(this.auth, email, pass);
-  }
-
-  async loginWithGoogle() {
-    if (!this.auth) return;
-    const provider = new GoogleAuthProvider();
-    try { await signInWithPopup(this.auth, provider); } 
-    catch(e) { await signInWithRedirect(this.auth, provider); }
-  }
-
-  async loginWithFacebook() {
-    if (!this.auth) return;
-    const provider = new FacebookAuthProvider();
-    try { await signInWithPopup(this.auth, provider); } 
-    catch(e) { await signInWithRedirect(this.auth, provider); }
   }
 
   private restoreSession(uid: string): boolean {
@@ -253,7 +227,6 @@ export class TournamentService {
       if (tName) this.tournamentName.set(tName);
 
       this.userRole.set(role);
-      // FIX: Ensure tournamentId handles undefined/null correctly
       this.userProfile.set({ id: uid, tournamentId: tid || null, name: name, role: role, isOnline: true });
       
       this.updateCloudProfile(uid, name, role, tid);
@@ -264,7 +237,7 @@ export class TournamentService {
         this.startListeners(tid);
       }
       
-      if (role === 'Admin') this.fetchAllTournaments();
+      if (role === 'Admin') this.fetchMyTournaments(uid);
   }
   
   async setProfile(name: string, role: 'Admin' | 'Judge' | 'Debater', tid: string | null, tName: string = '') {
@@ -281,7 +254,6 @@ export class TournamentService {
     if (tid) this.tournamentId.set(tid); else this.tournamentId.set(null);
     if (tName) this.tournamentName.set(tName);
     
-    // FIX: tournamentId is optional/nullable
     const profile: UserProfile = { id: uid, tournamentId: tid || null, name, role, isOnline: true, status: 'Active' };
     localStorage.setItem('debate-user-name', name);
     localStorage.setItem('debate-user-role', role);
@@ -292,8 +264,8 @@ export class TournamentService {
     await this.updateCloudProfile(uid, name, role, tid);
     
     if (role === 'Admin') {
-        await this.createTournamentRecord(tid || 'demo', uid); // Handle null tid for admins creating first one
-        this.fetchAllTournaments();
+        await this.createTournamentRecord(tid || 'demo', uid); 
+        this.fetchMyTournaments(uid);
     }
 
     if (tid) {
@@ -314,11 +286,22 @@ export class TournamentService {
 
   private fetchAllTournaments() {
       if (!this.db) {
-          // FIX: Explicit type annotation for update
           this.myTournaments.update((t: TournamentMeta[]) => [...t, { id: this.tournamentId() || 'demo', name: 'Demo', ownerId: 'me', status: 'Active', createdAt: Date.now() }]);
           return;
       }
-      const q = query(this.getCollection('tournaments')); // List all
+      const q = query(this.getCollection('tournaments')); 
+      if (this.tournamentUnsubscribe) this.tournamentUnsubscribe();
+      this.tournamentUnsubscribe = onSnapshot(q, (s) => {
+          this.myTournaments.set(s.docs.map(d => d.data() as TournamentMeta));
+      });
+  }
+
+  private fetchMyTournaments(uid: string) {
+      if (!this.db) {
+          this.myTournaments.set([{ id: this.tournamentId() || 'demo', name: 'Demo Tournament', ownerId: uid, status: 'Active', createdAt: Date.now() }]);
+          return;
+      }
+      const q = query(this.getCollection('tournaments'), where('ownerId', '==', uid));
       if (this.tournamentUnsubscribe) this.tournamentUnsubscribe();
       this.tournamentUnsubscribe = onSnapshot(q, (s) => {
           this.myTournaments.set(s.docs.map(d => d.data() as TournamentMeta));
@@ -361,7 +344,6 @@ export class TournamentService {
 
   async closeTournament(tid: string) {
       if (!this.db) {
-          // FIX: Typed parameter for map
           this.myTournaments.update((t: TournamentMeta[]) => t.map(x => x.id === tid ? { ...x, status: 'Closed' } : x));
           return;
       }
@@ -386,16 +368,26 @@ export class TournamentService {
     }
   }
   
+  private stopListeners() {
+      this.collectionUnsubscribes.forEach(u => u());
+      this.collectionUnsubscribes = [];
+  }
+
   private startListeners(tid: string) {
     if (!this.db) return;
+    this.stopListeners(); // Clean up old tournament listeners
+    
     const qJudges = query(this.getCollection('judges'), where('tournamentId', '==', tid));
-    onSnapshot(qJudges, (s) => this.judges.set(s.docs.map(d => ({id:d.id, ...d.data()} as UserProfile))));
+    this.collectionUnsubscribes.push(onSnapshot(qJudges, (s) => this.judges.set(s.docs.map(d => ({id:d.id, ...d.data()} as UserProfile)))));
+    
     const qDebaters = query(this.getCollection('debaters'), where('tournamentId', '==', tid));
-    onSnapshot(qDebaters, (s) => this.debaters.set(s.docs.map(d => ({id:d.id, ...d.data()} as UserProfile))));
+    this.collectionUnsubscribes.push(onSnapshot(qDebaters, (s) => this.debaters.set(s.docs.map(d => ({id:d.id, ...d.data()} as UserProfile)))));
+    
     const qDebates = query(this.getCollection('debates'), where('tournamentId', '==', tid));
-    onSnapshot(qDebates, (s) => this.debates.set(s.docs.map(d => ({id:d.id, ...d.data()} as Debate))));
+    this.collectionUnsubscribes.push(onSnapshot(qDebates, (s) => this.debates.set(s.docs.map(d => ({id:d.id, ...d.data()} as Debate)))));
+    
     const qResults = query(this.getCollection('results'), where('tournamentId', '==', tid));
-    onSnapshot(qResults, (s) => this.results.set(s.docs.map(d => ({id:d.id, ...d.data()} as RoundResult))));
+    this.collectionUnsubscribes.push(onSnapshot(qResults, (s) => this.results.set(s.docs.map(d => ({id:d.id, ...d.data()} as RoundResult)))));
   }
 
   private async isNameTaken(name: string, tid: string): Promise<boolean> {
@@ -433,7 +425,13 @@ export class TournamentService {
     if (!this.db) return;
     const tid = this.tournamentId();
     if (!tid) return;
-    await addDoc(this.getCollection('notifications'), { tournamentId: tid, recipientId: judgeId, message: "Please submit your ballot!", timestamp: Date.now() });
+    await addDoc(this.getCollection('notifications'), { 
+        tournamentId: tid, 
+        recipientId: judgeId, 
+        message: "Please submit your ballot!", 
+        debateId: this.activeDebateId(),
+        timestamp: Date.now() 
+    });
   }
 
   async dismissNotification(id: string) {
@@ -445,6 +443,7 @@ export class TournamentService {
     if (this.profileUnsubscribe) this.profileUnsubscribe();
     if (this.notificationUnsubscribe) this.notificationUnsubscribe();
     if (this.tournamentUnsubscribe) this.tournamentUnsubscribe();
+    this.stopListeners();
     
     const profile = this.userProfile();
     if (profile && this.db) {
@@ -512,6 +511,15 @@ export class TournamentService {
     if (!debate) return;
     const newJudges = [...new Set([...debate.judgeIds, judgeId])].slice(0, 3);
     await updateDoc(doc(this.db, 'artifacts', this.appId, 'public', 'data', 'debates', debateId), { judgeIds: newJudges });
+    
+    // Notify Judge
+    await addDoc(this.getCollection('notifications'), { 
+        tournamentId: this.tournamentId()!, 
+        recipientId: judgeId, 
+        message: `You have been assigned to judge: ${debate.topic}`, 
+        debateId: debateId,
+        timestamp: Date.now() 
+    });
   }
 
   async removeJudge(debateId: string, judgeId: string) {
@@ -541,7 +549,7 @@ export class TournamentService {
   async joinTournament(code: string) {
       const profile = this.userProfile();
       if (!profile) return;
-      if (!this.db) return; // Offline can't join
+      if (!this.db) return; 
       
       // Check if tournament exists
       const snap = await getDoc(doc(this.db, 'artifacts', this.appId, 'public', 'data', 'tournaments', code));

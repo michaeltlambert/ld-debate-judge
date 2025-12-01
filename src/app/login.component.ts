@@ -113,6 +113,7 @@ export class LoginComponent {
       this.loading = true;
       this.errorMsg = '';
 
+      // Validation
       if (!this.email.includes('@')) {
           this.errorMsg = "Please enter a valid email.";
           this.loading = false;

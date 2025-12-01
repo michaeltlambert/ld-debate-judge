@@ -33,13 +33,13 @@ import { TournamentService, UserProfile } from './tournament.service';
            </div>
         </div>
 
-        <!-- Middle/Right: Join Tournament & Stats -->
+        <!-- Right: Stats & Activity -->
         <div class="md:col-span-2 space-y-6">
         
-           <!-- Join Tournament Section (If no tournament assigned) -->
-           <div *ngIf="!tournament.tournamentId()" class="bg-blue-50 p-6 rounded-xl border border-blue-200">
-               <h3 class="text-lg font-bold text-blue-800 mb-2">Join a Tournament</h3>
-               <p class="text-sm text-blue-600 mb-4">Enter the 6-digit code provided by your administrator.</p>
+           <!-- Join Tournament Section (Always Visible for easy switching) -->
+           <div class="bg-blue-50 p-6 rounded-xl border border-blue-200">
+               <h3 class="text-lg font-bold text-blue-800 mb-2">Join / Switch Tournament</h3>
+               <p class="text-sm text-blue-600 mb-4">Enter a 6-digit code to join a new tournament.</p>
                <div class="flex gap-2">
                   <input [(ngModel)]="joinCode" class="flex-1 p-2 border border-blue-300 rounded font-mono uppercase" placeholder="CODE">
                   <button (click)="join()" class="bg-blue-600 text-white px-4 py-2 rounded font-bold hover:bg-blue-700">Join</button>

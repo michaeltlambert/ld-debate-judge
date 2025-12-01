@@ -20,7 +20,23 @@ const files = [
 }
 
 body {
-  @apply bg-slate-50 text-slate-900 font-sans;
+  @apply bg-slate-50 text-slate-900 font-sans antialiased;
+}
+
+/* Custom scrollbar for flow sheet */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent; 
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1; 
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8; 
 }`
   },
   {
@@ -28,23 +44,18 @@ body {
     content: `# DebateMate: Tournament Edition
 
 ## 📘 Project Overview
-DebateMate is a real-time Lincoln-Douglas adjudication system.
+DebateMate is a real-time Lincoln-Douglas adjudication system designed for high usability and strict tournament management.
 
-### **New Features: Tournament Management**
-* **Admin Portal:** Central hub to create, view, and manage all tournaments.
-* **Auto-Codes:** Tournaments get a unique 6-digit code upon creation.
-* **Multi-Admin:** Any admin can administer any open tournament.
-* **Archive Mode:** Closed tournaments become read-only for historical review.
+### **Features**
+* **Multi-Tournament Architecture:** Admins can create, switch between, and archive multiple independent tournaments.
+* **Strict Authentication:** Secure Email/Password login with persistent user profiles.
+* **Real-Time Flow:** Judges and Debaters can track arguments and add comments live.
+* **Automated Scoring:** Ballots automatically determine the winner based on point totals.
+* **Tournament Brackets:** Visual tracking of elimination rounds.
+* **PDF Export:** Judges can download their flow and ballot for records.
 
-## 🔧 Configuration (Required)
-To fix "auth/operation-not-allowed" or "auth/unauthorized-domain":
-
-1.  Go to **Firebase Console > Authentication > Sign-in method**.
-    * Click **Add new provider** -> **Google** -> Toggle **Enable** -> **Save**.
-    * Click **Add new provider** -> **Facebook** -> Toggle **Enable** -> **Save**.
-2.  Go to **Authentication > Settings > Authorized domains**.
-    * Add \`localhost\` to the list.
-3.  Update \`src/app/config.ts\` with your API Keys.
+## 🔧 Configuration
+Update \`src/app/config.ts\` with your API Keys.
 
 ## 🚀 Getting Started
 1.  **Install:** \`npm install\`
@@ -99,6 +110,72 @@ bootstrapApplication(AppComponent)
 };`
   },
   {
+    path: 'src/app/debate.service.ts',
+    content: `import { Injectable, signal } from '@angular/core';
+
+export interface Phase {
+  id: string; name: string; time: number; hint: string;
+}
+
+export type TimerType = 'SPEECH' | 'AFF_PREP' | 'NEG_PREP' | 'IDLE';
+
+@Injectable({ providedIn: 'root' })
+export class DebateService {
+  readonly PREP_ALLOWANCE = 240; 
+  readonly phases: Phase[] = [
+    { id: '1AC', name: 'Affirmative Constructive', time: 360, hint: 'Aff presents Value, Criterion, and Contentions.' },
+    { id: 'CX1', name: 'Cross-Ex (Neg Questions)', time: 180, hint: 'Neg clarifies arguments. No new arguments.' },
+    { id: '1NC', name: 'Negative Constructive', time: 420, hint: 'Neg presents case and attacks Aff.' },
+    { id: 'CX2', name: 'Cross-Ex (Aff Questions)', time: 180, hint: 'Aff questions Neg. Look for contradictions.' },
+    { id: '1AR', name: '1st Aff Rebuttal', time: 240, hint: 'Aff must answer ALL Neg attacks here.' },
+    { id: '2NR', name: 'Negative Rebuttal', time: 360, hint: 'Neg closing speech. Crystallize voting issues.' },
+    { id: '2AR', name: '2nd Aff Rebuttal', time: 180, hint: 'Aff closing speech. Explain why Aff wins.' },
+  ];
+
+  currentPhase = signal<Phase>(this.phases[0]);
+  speechTimer = signal<number>(360);
+  affPrep = signal<number>(this.PREP_ALLOWANCE);
+  negPrep = signal<number>(this.PREP_ALLOWANCE);
+  activeTimer = signal<TimerType>('IDLE');
+  private intervalId: any;
+
+  constructor() {
+    this.intervalId = setInterval(() => { this.tick(); }, 1000);
+  }
+
+  private tick() {
+    const type = this.activeTimer();
+    if (type === 'SPEECH') {
+      if (this.speechTimer() > 0) this.speechTimer.update(t => t - 1);
+      else this.stop();
+    } else if (type === 'AFF_PREP') {
+      if (this.affPrep() > 0) this.affPrep.update(t => t - 1);
+      else this.stop();
+    } else if (type === 'NEG_PREP') {
+      if (this.negPrep() > 0) this.negPrep.update(t => t - 1);
+      else this.stop();
+    }
+  }
+
+  toggleSpeech() { this.activeTimer() === 'SPEECH' ? this.stop() : this.activeTimer.set('SPEECH'); }
+  toggleAffPrep() { this.activeTimer() === 'AFF_PREP' ? this.stop() : this.activeTimer.set('AFF_PREP'); }
+  toggleNegPrep() { this.activeTimer() === 'NEG_PREP' ? this.stop() : this.activeTimer.set('NEG_PREP'); }
+  stop() { this.activeTimer.set('IDLE'); }
+  
+  setPhase(phase: Phase) {
+    this.stop();
+    this.currentPhase.set(phase);
+    this.speechTimer.set(phase.time);
+  }
+
+  formatTime(seconds: number): string {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return \`\${m}:\${s < 10 ? '0' : ''}\${s}\`;
+  }
+}`
+  },
+  {
     path: 'src/app/tournament.service.ts',
     content: `import { Injectable, signal, computed } from '@angular/core';
 import { initializeApp } from 'firebase/app';
@@ -108,8 +185,7 @@ import {
 } from 'firebase/firestore';
 import { 
   getAuth, signInAnonymously, onAuthStateChanged, 
-  User, signInWithCustomToken, signOut, GoogleAuthProvider, FacebookAuthProvider, 
-  signInWithPopup, signInWithRedirect, getRedirectResult,
+  User, signInWithCustomToken, signOut, 
   createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile
 } from 'firebase/auth';
 import { AppConfig } from './config';
@@ -143,7 +219,6 @@ export interface Debate {
 
 export interface UserProfile {
   id: string; 
-  // FIX: Allow null/undefined for users not yet in a tournament
   tournamentId?: string | null; 
   name: string;
   email?: string;
@@ -181,6 +256,7 @@ export interface Notification {
   tournamentId: string;
   recipientId: string;
   message: string;
+  debateId?: string;
   timestamp: number;
 }
 
@@ -199,10 +275,8 @@ export class TournamentService {
   results = signal<RoundResult[]>([]);
   notifications = signal<Notification[]>([]);
   
-  // Tournament Management
-  // FIX: Renamed from allTournaments to myTournaments to match component usage
+  // Admin: List of owned tournaments
   myTournaments = signal<TournamentMeta[]>([]);
-  
   currentTournamentStatus = computed(() => {
       const tid = this.tournamentId();
       return this.myTournaments().find(t => t.id === tid)?.status || 'Active';
@@ -242,6 +316,7 @@ export class TournamentService {
   private profileUnsubscribe: (() => void) | null = null;
   private notificationUnsubscribe: (() => void) | null = null;
   private tournamentUnsubscribe: (() => void) | null = null;
+  private collectionUnsubscribes: (() => void)[] = [];
 
   constructor() {
     this.appId = (window as any).__app_id || 'default-app';
@@ -263,17 +338,6 @@ export class TournamentService {
   }
 
   private async initAuth() {
-    try {
-      const redirectResult = await getRedirectResult(this.auth);
-      if (redirectResult?.user) {
-        this.user.set(redirectResult.user);
-        if (!this.restoreSession(redirectResult.user.uid)) {
-           this.recoverProfile(redirectResult.user.uid);
-        }
-        return;
-      }
-    } catch(e) { console.warn("Redirect Result check failed:", e); }
-
     const initialToken = (window as any).__initial_auth_token;
     if (initialToken && !this.auth.currentUser) await signInWithCustomToken(this.auth, initialToken);
 
@@ -287,6 +351,7 @@ export class TournamentService {
     });
   }
 
+  // --- AUTH METHODS ---
   async registerWithEmail(email: string, pass: string, name: string, role: any, tid: string | null) {
      if (!this.auth) {
          await this.setProfile(name, role, tid);
@@ -304,20 +369,6 @@ export class TournamentService {
   async loginWithEmail(email: string, pass: string) {
       if (!this.auth) throw new Error("Email Login requires Firebase config.");
       await signInWithEmailAndPassword(this.auth, email, pass);
-  }
-
-  async loginWithGoogle() {
-    if (!this.auth) return;
-    const provider = new GoogleAuthProvider();
-    try { await signInWithPopup(this.auth, provider); } 
-    catch(e) { await signInWithRedirect(this.auth, provider); }
-  }
-
-  async loginWithFacebook() {
-    if (!this.auth) return;
-    const provider = new FacebookAuthProvider();
-    try { await signInWithPopup(this.auth, provider); } 
-    catch(e) { await signInWithRedirect(this.auth, provider); }
   }
 
   private restoreSession(uid: string): boolean {
@@ -355,7 +406,6 @@ export class TournamentService {
       if (tName) this.tournamentName.set(tName);
 
       this.userRole.set(role);
-      // FIX: Ensure tournamentId handles undefined/null correctly
       this.userProfile.set({ id: uid, tournamentId: tid || null, name: name, role: role, isOnline: true });
       
       this.updateCloudProfile(uid, name, role, tid);
@@ -366,7 +416,7 @@ export class TournamentService {
         this.startListeners(tid);
       }
       
-      if (role === 'Admin') this.fetchAllTournaments();
+      if (role === 'Admin') this.fetchMyTournaments(uid);
   }
   
   async setProfile(name: string, role: 'Admin' | 'Judge' | 'Debater', tid: string | null, tName: string = '') {
@@ -383,7 +433,6 @@ export class TournamentService {
     if (tid) this.tournamentId.set(tid); else this.tournamentId.set(null);
     if (tName) this.tournamentName.set(tName);
     
-    // FIX: tournamentId is optional/nullable
     const profile: UserProfile = { id: uid, tournamentId: tid || null, name, role, isOnline: true, status: 'Active' };
     localStorage.setItem('debate-user-name', name);
     localStorage.setItem('debate-user-role', role);
@@ -394,8 +443,8 @@ export class TournamentService {
     await this.updateCloudProfile(uid, name, role, tid);
     
     if (role === 'Admin') {
-        await this.createTournamentRecord(tid || 'demo', uid); // Handle null tid for admins creating first one
-        this.fetchAllTournaments();
+        await this.createTournamentRecord(tid || 'demo', uid); 
+        this.fetchMyTournaments(uid);
     }
 
     if (tid) {
@@ -416,11 +465,22 @@ export class TournamentService {
 
   private fetchAllTournaments() {
       if (!this.db) {
-          // FIX: Explicit type annotation for update
           this.myTournaments.update((t: TournamentMeta[]) => [...t, { id: this.tournamentId() || 'demo', name: 'Demo', ownerId: 'me', status: 'Active', createdAt: Date.now() }]);
           return;
       }
-      const q = query(this.getCollection('tournaments')); // List all
+      const q = query(this.getCollection('tournaments')); 
+      if (this.tournamentUnsubscribe) this.tournamentUnsubscribe();
+      this.tournamentUnsubscribe = onSnapshot(q, (s) => {
+          this.myTournaments.set(s.docs.map(d => d.data() as TournamentMeta));
+      });
+  }
+
+  private fetchMyTournaments(uid: string) {
+      if (!this.db) {
+          this.myTournaments.set([{ id: this.tournamentId() || 'demo', name: 'Demo Tournament', ownerId: uid, status: 'Active', createdAt: Date.now() }]);
+          return;
+      }
+      const q = query(this.getCollection('tournaments'), where('ownerId', '==', uid));
       if (this.tournamentUnsubscribe) this.tournamentUnsubscribe();
       this.tournamentUnsubscribe = onSnapshot(q, (s) => {
           this.myTournaments.set(s.docs.map(d => d.data() as TournamentMeta));
@@ -463,7 +523,6 @@ export class TournamentService {
 
   async closeTournament(tid: string) {
       if (!this.db) {
-          // FIX: Typed parameter for map
           this.myTournaments.update((t: TournamentMeta[]) => t.map(x => x.id === tid ? { ...x, status: 'Closed' } : x));
           return;
       }
@@ -488,16 +547,26 @@ export class TournamentService {
     }
   }
   
+  private stopListeners() {
+      this.collectionUnsubscribes.forEach(u => u());
+      this.collectionUnsubscribes = [];
+  }
+
   private startListeners(tid: string) {
     if (!this.db) return;
+    this.stopListeners(); // Clean up old tournament listeners
+    
     const qJudges = query(this.getCollection('judges'), where('tournamentId', '==', tid));
-    onSnapshot(qJudges, (s) => this.judges.set(s.docs.map(d => ({id:d.id, ...d.data()} as UserProfile))));
+    this.collectionUnsubscribes.push(onSnapshot(qJudges, (s) => this.judges.set(s.docs.map(d => ({id:d.id, ...d.data()} as UserProfile)))));
+    
     const qDebaters = query(this.getCollection('debaters'), where('tournamentId', '==', tid));
-    onSnapshot(qDebaters, (s) => this.debaters.set(s.docs.map(d => ({id:d.id, ...d.data()} as UserProfile))));
+    this.collectionUnsubscribes.push(onSnapshot(qDebaters, (s) => this.debaters.set(s.docs.map(d => ({id:d.id, ...d.data()} as UserProfile)))));
+    
     const qDebates = query(this.getCollection('debates'), where('tournamentId', '==', tid));
-    onSnapshot(qDebates, (s) => this.debates.set(s.docs.map(d => ({id:d.id, ...d.data()} as Debate))));
+    this.collectionUnsubscribes.push(onSnapshot(qDebates, (s) => this.debates.set(s.docs.map(d => ({id:d.id, ...d.data()} as Debate)))));
+    
     const qResults = query(this.getCollection('results'), where('tournamentId', '==', tid));
-    onSnapshot(qResults, (s) => this.results.set(s.docs.map(d => ({id:d.id, ...d.data()} as RoundResult))));
+    this.collectionUnsubscribes.push(onSnapshot(qResults, (s) => this.results.set(s.docs.map(d => ({id:d.id, ...d.data()} as RoundResult)))));
   }
 
   private async isNameTaken(name: string, tid: string): Promise<boolean> {
@@ -535,7 +604,13 @@ export class TournamentService {
     if (!this.db) return;
     const tid = this.tournamentId();
     if (!tid) return;
-    await addDoc(this.getCollection('notifications'), { tournamentId: tid, recipientId: judgeId, message: "Please submit your ballot!", timestamp: Date.now() });
+    await addDoc(this.getCollection('notifications'), { 
+        tournamentId: tid, 
+        recipientId: judgeId, 
+        message: "Please submit your ballot!", 
+        debateId: this.activeDebateId(),
+        timestamp: Date.now() 
+    });
   }
 
   async dismissNotification(id: string) {
@@ -547,6 +622,7 @@ export class TournamentService {
     if (this.profileUnsubscribe) this.profileUnsubscribe();
     if (this.notificationUnsubscribe) this.notificationUnsubscribe();
     if (this.tournamentUnsubscribe) this.tournamentUnsubscribe();
+    this.stopListeners();
     
     const profile = this.userProfile();
     if (profile && this.db) {
@@ -614,6 +690,15 @@ export class TournamentService {
     if (!debate) return;
     const newJudges = [...new Set([...debate.judgeIds, judgeId])].slice(0, 3);
     await updateDoc(doc(this.db, 'artifacts', this.appId, 'public', 'data', 'debates', debateId), { judgeIds: newJudges });
+    
+    // Notify Judge
+    await addDoc(this.getCollection('notifications'), { 
+        tournamentId: this.tournamentId()!, 
+        recipientId: judgeId, 
+        message: \`You have been assigned to judge: \${debate.topic}\`, 
+        debateId: debateId,
+        timestamp: Date.now() 
+    });
   }
 
   async removeJudge(debateId: string, judgeId: string) {
@@ -643,7 +728,7 @@ export class TournamentService {
   async joinTournament(code: string) {
       const profile = this.userProfile();
       if (!profile) return;
-      if (!this.db) return; // Offline can't join
+      if (!this.db) return; 
       
       // Check if tournament exists
       const snap = await getDoc(doc(this.db, 'artifacts', this.appId, 'public', 'data', 'tournaments', code));
@@ -806,6 +891,7 @@ export class LoginComponent {
       this.loading = true;
       this.errorMsg = '';
 
+      // Validation
       if (!this.email.includes('@')) {
           this.errorMsg = "Please enter a valid email.";
           this.loading = false;
@@ -964,14 +1050,14 @@ import { TournamentService } from './tournament.service';
             </div>
             <div class="flex items-center gap-4">
               <!-- Profile Trigger -->
-              <button (click)="showProfile.set(true)" class="flex items-center gap-2 text-right hover:bg-slate-50 px-2 py-1 rounded transition-colors">
+              <button (click)="showProfile.set(true)" class="flex items-center gap-2 text-right hover:bg-slate-50 px-2 py-1 rounded transition-colors" title="View Profile">
                 <div class="hidden sm:block">
                    <div class="text-xs font-bold text-slate-700">{{ tournament.userProfile()?.name }}</div>
                    <div class="text-[10px] text-slate-400">View Profile</div>
                 </div>
                 <img [src]="tournament.userProfile()?.photoURL || 'https://ui-avatars.com/api/?name=' + tournament.userProfile()?.name" class="w-8 h-8 rounded-full border border-slate-200">
               </button>
-              <button (click)="tournament.logout()" class="text-xs font-bold text-red-500 hover:bg-red-50 px-3 py-2 rounded transition-colors" aria-label="Log Out">
+              <button (click)="tournament.logout()" class="text-xs font-bold text-red-500 hover:bg-red-50 px-3 py-2 rounded transition-colors" aria-label="Log Out" title="Log Out">
                 Log Out
               </button>
             </div>
@@ -979,7 +1065,8 @@ import { TournamentService } from './tournament.service';
 
           <div *ngFor="let n of tournament.notifications()" class="bg-yellow-500 text-white px-4 py-2 text-center text-sm font-bold flex justify-between items-center sticky top-[60px] z-50 shadow-md animate-in slide-in-from-top">
              <div class="flex items-center gap-2 mx-auto"><span>🔔</span><span>{{ n.message }}</span></div>
-             <button (click)="tournament.dismissNotification(n.id)" class="hover:bg-yellow-600 p-1 rounded">&times;</button>
+             <button *ngIf="n.debateId" (click)="tournament.activeDebateId.set(n.debateId); tournament.dismissNotification(n.id)" class="bg-white text-yellow-600 px-2 py-0.5 rounded text-xs hover:bg-slate-100 ml-2" title="Go to debate round">Go to Round</button>
+             <button (click)="tournament.dismissNotification(n.id)" class="hover:bg-yellow-600 p-1 rounded" title="Dismiss notification">&times;</button>
           </div>
 
           <!-- ROUTING -->
@@ -1012,13 +1099,13 @@ import { TournamentService } from './tournament.service';
                   <app-timer class="flex-none" />
                   <div class="bg-slate-100 px-4 py-1 text-xs text-center border-b border-slate-200 flex justify-between items-center">
                      <span class="font-bold text-slate-600">Topic: {{ getCurrentDebate()?.topic }}</span>
-                     <button (click)="tournament.activeDebateId.set(null)" class="text-red-500 hover:underline">Exit Round</button>
+                     <button (click)="tournament.activeDebateId.set(null)" class="text-red-500 hover:underline" title="Return to Dashboard">Exit Round</button>
                   </div>
                   <main class="flex-1 p-4 overflow-hidden relative"><app-flow class="h-full block" /></main>
                   <footer class="bg-white border-t border-slate-200 p-2 flex-none z-40">
                     <div class="max-w-7xl mx-auto flex justify-between items-center">
                       <div class="text-xs text-slate-400"><strong>DebateMate</strong> 2025</div>
-                      <button (click)="showBallot.set(!showBallot())" class="px-6 py-2 bg-slate-900 text-white font-bold rounded-lg hover:bg-slate-800 transition-all">{{ isDebater() ? 'View Feedback' : 'Score Round' }}</button>
+                      <button (click)="showBallot.set(!showBallot())" class="px-6 py-2 bg-slate-900 text-white font-bold rounded-lg hover:bg-slate-800 transition-all" title="View/Edit Ballot">{{ isDebater() ? 'View Feedback' : 'Score Round' }}</button>
                     </div>
                     <div *ngIf="showBallot()" class="border-t border-slate-100 mt-2 p-4 bg-slate-50 max-h-[60vh] overflow-y-auto"><div class="max-w-3xl mx-auto"><app-ballot /></div></div>
                   </footer>
@@ -1067,16 +1154,16 @@ import { TournamentService, Debate, RoundType, RoundStage, UserProfile } from '.
       <header class="max-w-7xl mx-auto mb-8 flex justify-between items-center">
         <div>
           <h1 class="text-2xl font-bold text-slate-900">{{ tournament.tournamentName() }}</h1>
-          <p class="text-slate-500">Code: <span class="font-mono font-bold text-blue-600">{{ tournament.tournamentId() }}</span></p>
+          <p class="text-slate-500">Code: <span class="font-mono font-bold text-blue-600" title="Copy to share">{{ tournament.tournamentId() }}</span></p>
         </div>
         <div class="flex items-center gap-4">
-           <button (click)="backToList()" class="text-sm font-bold text-slate-500 hover:text-slate-800 underline">Switch Tournament</button>
+           <button (click)="backToList()" class="text-sm font-bold text-slate-500 hover:text-slate-800 underline" title="Switch Tournament">Switch Tournament</button>
            
            <!-- Close Tournament -->
-           <button *ngIf="!tournament.isTournamentClosed()" (click)="closeTournament()" class="text-xs font-bold bg-red-50 text-red-600 px-3 py-2 rounded hover:bg-red-100 transition-colors border border-red-100">End Tournament</button>
+           <button *ngIf="!tournament.isTournamentClosed()" (click)="closeTournament()" class="text-xs font-bold bg-red-50 text-red-600 px-3 py-2 rounded hover:bg-red-100 transition-colors border border-red-100" title="End Tournament">End Tournament</button>
            <div *ngIf="tournament.isTournamentClosed()" class="text-xs font-bold bg-gray-100 text-gray-500 px-3 py-2 rounded border border-gray-200">ARCHIVED</div>
            
-           <button (click)="tournament.logout()" class="text-sm font-bold text-red-500 hover:text-red-700 underline ml-4">Log Out</button>
+           <button (click)="tournament.logout()" class="text-sm font-bold text-red-500 hover:text-red-700 underline ml-4" title="Log Out">Log Out</button>
         </div>
       </header>
 
@@ -1086,6 +1173,11 @@ import { TournamentService, Debate, RoundType, RoundStage, UserProfile } from '.
 
       <main class="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8">
         
+        <div class="col-span-12 flex gap-4 mb-4 border-b border-slate-200">
+            <button (click)="activeTab.set('Dashboard')" [class.border-slate-800]="activeTab()==='Dashboard'" class="pb-2 border-b-2 border-transparent font-bold text-sm">Rounds</button>
+            <button (click)="activeTab.set('Bracket')" [class.border-slate-800]="activeTab()==='Bracket'" class="pb-2 border-b-2 border-transparent font-bold text-sm">Bracket</button>
+        </div>
+
         <!-- DASHBOARD TAB -->
         <div *ngIf="activeTab() === 'Dashboard'" class="contents">
              <div class="lg:col-span-4 space-y-6">
@@ -1110,12 +1202,12 @@ import { TournamentService, Debate, RoundType, RoundStage, UserProfile } from '.
                         </select>
                       </div>
                       <div class="space-y-2">
-                        <select [(ngModel)]="selectedAffId" class="w-full p-2 border rounded text-sm bg-white"><option *ngFor="let d of tournament.debaters()" [value]="d.id">{{ d.name }}</option></select>
+                        <select [(ngModel)]="selectedAffId" class="w-full p-2 border rounded text-sm bg-white"><option *ngFor="let d of tournament.debaters()" [value]="d.id" [disabled]="d.status === 'Eliminated'" [class.text-red-400]="d.status === 'Eliminated'">{{ d.name }} {{ d.status === 'Eliminated' ? '(Eliminated)' : '' }}</option></select>
                       </div>
                       <div class="space-y-2">
-                        <select [(ngModel)]="selectedNegId" class="w-full p-2 border rounded text-sm bg-white"><option *ngFor="let d of tournament.debaters()" [value]="d.id">{{ d.name }}</option></select>
+                        <select [(ngModel)]="selectedNegId" class="w-full p-2 border rounded text-sm bg-white"><option *ngFor="let d of tournament.debaters()" [value]="d.id" [disabled]="d.status === 'Eliminated'" [class.text-red-400]="d.status === 'Eliminated'">{{ d.name }} {{ d.status === 'Eliminated' ? '(Eliminated)' : '' }}</option></select>
                       </div>
-                      <button (click)="create()" class="w-full bg-slate-900 text-white font-bold py-3 rounded-lg hover:bg-slate-800">Create Matchup</button>
+                      <button (click)="create()" class="w-full bg-slate-900 text-white font-bold py-3 rounded-lg hover:bg-slate-800" title="Create Matchup">Create Matchup</button>
                     </div>
                  </div>
                  
@@ -1123,26 +1215,21 @@ import { TournamentService, Debate, RoundType, RoundStage, UserProfile } from '.
                     <h2 class="font-bold text-slate-800 mb-4">Participants</h2>
                     <div class="max-h-64 overflow-y-auto space-y-2">
                          <div *ngFor="let d of tournament.debaters()" class="flex justify-between text-sm p-2 bg-slate-50 rounded">
-                             <span>{{ d.name }}</span>
+                             <span [class.line-through]="d.status === 'Eliminated'" [class.text-slate-400]="d.status === 'Eliminated'">{{ d.name }}</span>
                              <div class="flex gap-2">
-                                 <button *ngIf="!tournament.isTournamentClosed()" (click)="toggleStatus(d)">{{ d.status === 'Eliminated' ? '❤️' : '💀' }}</button>
-                                 <button *ngIf="!tournament.isTournamentClosed()" (click)="tournament.kickUser(d.id, 'Debater')" class="text-red-500">&times;</button>
+                                 <button *ngIf="!tournament.isTournamentClosed()" (click)="toggleStatus(d)" title="Toggle Status">{{ d.status === 'Eliminated' ? '❤️' : '💀' }}</button>
+                                 <button *ngIf="!tournament.isTournamentClosed()" (click)="tournament.kickUser(d.id, 'Debater')" class="text-red-500" title="Kick User">&times;</button>
                              </div>
                          </div>
                          <div *ngFor="let j of tournament.judges()" class="flex justify-between text-sm p-2 bg-slate-50 rounded">
                              <span>{{ j.name }} (J)</span>
-                             <button *ngIf="!tournament.isTournamentClosed()" (click)="tournament.kickUser(j.id, 'Judge')" class="text-red-500">&times;</button>
+                             <button *ngIf="!tournament.isTournamentClosed()" (click)="tournament.kickUser(j.id, 'Judge')" class="text-red-500" title="Kick User">&times;</button>
                          </div>
                     </div>
                  </div>
              </div>
              
              <div class="lg:col-span-8 space-y-6">
-                <div class="flex gap-4 mb-4 border-b border-slate-200">
-                    <button (click)="activeTab.set('Dashboard')" [class.border-slate-800]="activeTab()==='Dashboard'" class="pb-2 border-b-2 border-transparent font-bold text-sm">Rounds</button>
-                    <button (click)="activeTab.set('Bracket')" [class.border-slate-800]="activeTab()==='Bracket'" class="pb-2 border-b-2 border-transparent font-bold text-sm">Bracket</button>
-                </div>
-
                 <div *ngFor="let debate of tournament.debates()" class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 mb-4">
                      <div class="flex justify-between items-start mb-4 border-b border-slate-100 pb-3">
                         <div>
@@ -1160,7 +1247,7 @@ import { TournamentService, Debate, RoundType, RoundStage, UserProfile } from '.
                                     <option *ngFor="let judge of getUnassignedJudges(debate)" [value]="judge.id">{{ judge.name }}</option>
                                 </select>
                             </div>
-                            <button *ngIf="debate.status === 'Open'" (click)="tournament.finalizeRound(debate.id)" class="bg-slate-800 text-white text-xs font-bold px-3 py-2 rounded hover:bg-slate-900">Finalize</button>
+                            <button *ngIf="debate.status === 'Open'" (click)="tournament.finalizeRound(debate.id)" class="bg-slate-800 text-white text-xs font-bold px-3 py-2 rounded hover:bg-slate-900" title="Finalize Round">Finalize</button>
                             <button (click)="tournament.deleteDebate(debate.id)" class="text-slate-300 hover:text-red-500 p-2" title="Delete Debate"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" /></svg></button>
                         </div>
                      </div>
@@ -1168,7 +1255,7 @@ import { TournamentService, Debate, RoundType, RoundStage, UserProfile } from '.
                         <div *ngFor="let judgeId of debate.judgeIds" class="bg-slate-50 rounded-lg p-3 border border-slate-200 relative group">
                             <div class="flex justify-between items-center mb-1">
                                 <span class="text-xs font-bold text-slate-700 flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-green-500"></span> {{ getJudgeName(judgeId) }}</span>
-                                <button *ngIf="debate.status === 'Open' && !tournament.isTournamentClosed()" (click)="remove(debate.id, judgeId)" class="text-slate-300 hover:text-red-500 font-bold text-xs">Remove</button>
+                                <button *ngIf="debate.status === 'Open' && !tournament.isTournamentClosed()" (click)="remove(debate.id, judgeId)" class="text-slate-300 hover:text-red-500 font-bold text-xs" title="Unassign Judge">Remove</button>
                             </div>
                             <div *ngIf="getResult(debate.id, judgeId) as res; else pending" class="animate-in fade-in bg-white p-2 rounded border border-slate-100 mt-2">
                                 <div class="flex justify-between text-xs font-bold mb-1">
@@ -1182,7 +1269,7 @@ import { TournamentService, Debate, RoundType, RoundStage, UserProfile } from '.
                             <ng-template #pending>
                                 <div class="flex items-center justify-between w-full mt-2 pl-2">
                                     <span class="text-[10px] text-slate-400">Pending...</span>
-                                    <button *ngIf="!tournament.isTournamentClosed()" (click)="tournament.sendNudge(judgeId)" class="text-[10px] bg-amber-100 text-amber-700 px-2 py-1 rounded hover:bg-amber-200 font-bold flex items-center gap-1">🔔 Nudge</button>
+                                    <button *ngIf="!tournament.isTournamentClosed()" (click)="tournament.sendNudge(judgeId)" class="text-[10px] bg-amber-100 text-amber-700 px-2 py-1 rounded hover:bg-amber-200 font-bold flex items-center gap-1" title="Send reminder notification">🔔 Nudge</button>
                                 </div>
                             </ng-template>
                         </div>
@@ -1193,24 +1280,18 @@ import { TournamentService, Debate, RoundType, RoundStage, UserProfile } from '.
         </div>
 
         <!-- BRACKET TAB -->
-        <div *ngIf="activeTab() === 'Bracket'" class="lg:col-span-12">
-           <div class="flex gap-4 mb-4 border-b border-slate-200">
-               <button (click)="activeTab.set('Dashboard')" class="pb-2 border-b-2 border-transparent font-bold text-sm">Rounds</button>
-               <button (click)="activeTab.set('Bracket')" class="pb-2 border-b-2 border-slate-800 font-bold text-sm">Bracket</button>
-           </div>
-           <div class="w-full overflow-x-auto pb-8">
-               <div class="flex gap-8 min-w-max">
-                  <div *ngFor="let stage of bracketStages" class="w-64 flex-none space-y-4">
-                      <h3 class="font-bold text-center text-slate-500 uppercase tracking-widest text-xs mb-4 sticky top-0 bg-slate-100 py-2">{{ stage }}</h3>
-                      <div *ngFor="let d of getDebatesForStage(stage)" class="bg-white border border-slate-200 rounded-lg shadow-sm p-3 relative">
-                          <div class="text-[10px] text-slate-400 mb-2 truncate font-mono">{{ d.topic }}</div>
-                          <div class="space-y-1">
-                             <div class="flex justify-between p-1 rounded text-xs font-bold" [class.bg-green-100]="d.status === 'Closed' && getWinner(d.id) === 'Aff'"><span>{{ d.affName }}</span><span *ngIf="d.status === 'Closed' && getWinner(d.id) === 'Aff'">✓</span></div>
-                             <div class="flex justify-between p-1 rounded text-xs font-bold" [class.bg-green-100]="d.status === 'Closed' && getWinner(d.id) === 'Neg'"><span>{{ d.negName }}</span><span *ngIf="d.status === 'Closed' && getWinner(d.id) === 'Neg'">✓</span></div>
-                          </div>
+        <div *ngIf="activeTab() === 'Bracket'" class="col-span-12 lg:col-span-12 w-full overflow-x-auto pb-8">
+           <div class="flex gap-8 min-w-max">
+              <div *ngFor="let stage of bracketStages" class="w-64 flex-none space-y-4">
+                  <h3 class="font-bold text-center text-slate-500 uppercase tracking-widest text-xs mb-4 sticky top-0 bg-slate-100 py-2">{{ stage }}</h3>
+                  <div *ngFor="let d of getDebatesForStage(stage)" class="bg-white border border-slate-200 rounded-lg shadow-sm p-3 relative">
+                      <div class="text-[10px] text-slate-400 mb-2 truncate font-mono">{{ d.topic }}</div>
+                      <div class="space-y-1">
+                         <div class="flex justify-between p-1 rounded text-xs font-bold" [class.bg-green-100]="d.status === 'Closed' && getWinner(d.id) === 'Aff'"><span>{{ d.affName }}</span><span *ngIf="d.status === 'Closed' && getWinner(d.id) === 'Aff'">✓</span></div>
+                         <div class="flex justify-between p-1 rounded text-xs font-bold" [class.bg-green-100]="d.status === 'Closed' && getWinner(d.id) === 'Neg'"><span>{{ d.negName }}</span><span *ngIf="d.status === 'Closed' && getWinner(d.id) === 'Neg'">✓</span></div>
                       </div>
                   </div>
-               </div>
+              </div>
            </div>
         </div>
       </main>
@@ -1276,6 +1357,17 @@ import { TournamentService, RoundResult } from './tournament.service';
             <h2 class="font-bold text-slate-800 text-xl">Ballot</h2>
             <span *ngIf="isLocked()" class="text-red-600 font-bold uppercase text-xs">Locked</span>
           </div>
+          <div class="flex justify-end mb-2">
+              <button (click)="toggleHints()" class="text-xs font-semibold px-3 py-1.5 rounded-full bg-blue-50 text-blue-600 hover:bg-blue-100 transition-all" title="Show/Hide guidelines">
+                  {{ showHints() ? 'Hide Guidelines' : 'Show Guidelines' }}
+              </button>
+          </div>
+          
+          <div *ngIf="showHints()" class="mb-6 grid grid-cols-1 md:grid-cols-2 gap-2 transition-all">
+             <div class="bg-indigo-50 border border-indigo-100 p-2 rounded text-[10px] text-indigo-900"><strong>Framework:</strong> Value & Criterion</div>
+             <div class="bg-amber-50 border border-amber-100 p-2 rounded text-[10px] text-amber-900"><strong>Tabula Rasa:</strong> No bias</div>
+          </div>
+
           <div class="grid grid-cols-2 gap-6 mb-6">
              <input type="number" [(ngModel)]="affPoints" [disabled]="isLocked()" class="border p-2 rounded text-center font-bold text-xl">
              <input type="number" [(ngModel)]="negPoints" [disabled]="isLocked()" class="border p-2 rounded text-center font-bold text-xl">
@@ -1285,7 +1377,7 @@ import { TournamentService, RoundResult } from './tournament.service';
              <button (click)="!isLocked() && decision.set('Neg')" [class]="decision() === 'Neg' ? 'bg-red-600 text-white' : 'bg-slate-100'" class="flex-1 py-3 rounded font-bold">Negative</button>
           </div>
           <textarea [(ngModel)]="rfdText" [disabled]="isLocked()" class="w-full h-32 border rounded p-2 text-sm" placeholder="Reason for Decision"></textarea>
-          <button *ngIf="!isLocked()" (click)="submitRound()" class="w-full mt-4 bg-slate-900 text-white font-bold py-3 rounded hover:bg-slate-800">Submit Ballot</button>
+          <button *ngIf="!isLocked()" (click)="submitRound()" class="w-full mt-4 bg-slate-900 text-white font-bold py-3 rounded hover:bg-slate-800" title="Submit Ballot">Submit Ballot</button>
       </div>
       <div *ngIf="isDebater()" class="text-center text-slate-400 italic py-8">
           Submitting ballots is restricted to Judges. Use the dashboard to view feedback.
@@ -1300,6 +1392,10 @@ export class BallotComponent {
   negPoints = signal(28);
   decision = signal<'Aff' | 'Neg' | null>(null);
   rfdText = ''; 
+  isUpdate = false;
+  
+  // Re-added missing signal
+  showHints = signal(true);
 
   constructor() {
     effect(() => {
@@ -1308,10 +1404,13 @@ export class BallotComponent {
       if (debateId && userId) {
           const existing = this.tournament.results().find(r => r.debateId === debateId && r.judgeId === userId);
           if (existing) {
+              this.isUpdate = true;
               this.affPoints.set(existing.affScore);
               this.negPoints.set(existing.negScore);
               this.decision.set(existing.decision);
               this.rfdText = existing.rfd;
+          } else {
+              this.resetBallot();
           }
       }
     }, { allowSignalWrites: true });
@@ -1323,12 +1422,206 @@ export class BallotComponent {
       return d?.status === 'Closed';
   }
 
+  resetBallot() {
+    this.isUpdate = false;
+    this.affPoints.set(28);
+    this.negPoints.set(28);
+    this.decision.set(null);
+    this.rfdText = '';
+  }
+
+  toggleHints() { this.showHints.update(v => !v); }
+
   submitRound() {
-    if (this.isLocked() || !this.decision()) return;
+    if (this.isLocked()) return;
+    if (!this.decision()) return;
+    const debateId = this.tournament.activeDebateId();
+    if (!debateId) return;
+
     this.tournament.submitBallot(this.tournament.activeDebateId()!, {
       affScore: this.affPoints(), negScore: this.negPoints(), decision: this.decision()!, rfd: this.rfdText, timestamp: Date.now()
-    }).then(() => alert("Submitted!"));
+    }).then(() => {
+      alert(this.isUpdate ? "Ballot Updated!" : "Ballot Submitted!");
+      this.isUpdate = true;
+    }).catch(e => alert(e.message));
   }
+  
+  // Helper methods for template actions
+  checkInput(event: Event, side: 'aff' | 'neg') {
+    const input = event.target as HTMLInputElement;
+    let val = parseFloat(input.value);
+    if (val > 30) { input.value = '30'; val = 30; } else if (val < 0) { input.value = '0'; val = 0; }
+    if (side === 'aff') this.setAff(val); else this.setNeg(val);
+  }
+  setAff(val: number) { this.affPoints.set(val); this.autoCalculateWinner(); }
+  setNeg(val: number) { this.negPoints.set(val); this.autoCalculateWinner(); }
+  autoCalculateWinner() {
+    if (this.affPoints() > this.negPoints()) this.decision.set('Aff');
+    else if (this.negPoints() > this.affPoints()) this.decision.set('Neg');
+    else this.decision.set(null);
+  }
+  manualOverride(winner: 'Aff' | 'Neg') { this.decision.set(winner); }
+  exportToPdf() { this.pdfService.generateBallotPdf('debate-flow', 'debate-ballot'); }
+}`
+  },
+  {
+    path: 'src/app/flow.component.ts',
+    content: `import { Component, signal, effect, inject } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
+import { TermComponent } from './term.component';
+import { TournamentService } from './tournament.service';
+
+export interface DebateArgument {
+  id: string; text: string; colIdx: number; status: 'open' | 'addressed' | 'dropped'; parentId: string | null; isVoter?: boolean; comments?: string;
+}
+interface ColumnDef { id: string; name: string; isCx: boolean; }
+interface FrameworkData { value: string; criterion: string; }
+
+@Component({
+  selector: 'app-flow',
+  standalone: true,
+  imports: [CommonModule, FormsModule, TermComponent],
+  template: \`
+    <div id="debate-flow" class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 h-full flex flex-col">
+      <div class="mb-4 flex items-center justify-between">
+        <div>
+          <h2 class="font-bold text-slate-700">Interactive Flow Sheet</h2>
+          <p class="text-xs text-slate-500">Star <span class="text-purple-600 font-bold">★ Voting Issues</span> to track winning arguments.</p>
+        </div>
+        <button (click)="resetFlow()" class="text-xs text-red-400 hover:text-red-600 underline" aria-label="Clear All Notes">Clear All</button>
+      </div>
+      <div class="flex-1 overflow-x-auto pb-12" (click)="closeMenus()"> 
+        <div class="flex h-full min-w-max divide-x divide-slate-200 border border-slate-200 rounded-lg bg-slate-50">
+          <div *ngFor="let col of columns; let i = index" class="flex flex-col group transition-all" [ngClass]="col.isCx ? 'w-64 bg-amber-50/50' : 'w-80 bg-slate-50'">
+            <div class="p-3 text-center text-xs font-bold uppercase tracking-wider border-b border-slate-200 sticky top-0 z-20 shadow-sm" [ngClass]="col.isCx ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-600'">{{ col.name }}</div>
+            <div class="flex-1 p-2 space-y-3 overflow-y-auto min-h-[400px]">
+              <div *ngIf="['1AC', '1NC'].includes(col.id)" class="mb-4 p-3 rounded-lg border-2 border-dashed border-indigo-200 bg-indigo-50/50">
+                <div class="text-[10px] font-bold text-indigo-400 uppercase tracking-widest mb-2 text-center">Framework</div>
+                <div class="flex items-center gap-2 mb-2">
+                  <span class="text-xs font-bold text-indigo-700 w-16 text-right"><app-term lookup="Value Premise">Value</app-term>:</span>
+                  <input type="text" [(ngModel)]="frameworks()[col.id].value" (ngModelChange)="saveData()" placeholder="e.g. Justice" class="flex-1 text-sm font-bold text-indigo-900 bg-white border border-indigo-100 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500" aria-label="Value Premise">
+                </div>
+                <div class="flex items-center gap-2">
+                  <span class="text-xs font-bold text-indigo-700 w-16 text-right"><app-term lookup="Value Criterion">Criterion</app-term>:</span>
+                  <input type="text" [(ngModel)]="frameworks()[col.id].criterion" (ngModelChange)="saveData()" placeholder="e.g. Social Welfare" class="flex-1 text-sm font-medium text-indigo-800 bg-white border border-indigo-100 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500" aria-label="Value Criterion">
+                </div>
+              </div>
+              <div *ngFor="let arg of getArgsForCol(i)" class="relative p-3 rounded-lg border shadow-sm transition-all group/card" [ngClass]="{'bg-purple-50 border-purple-300 ring-1 ring-purple-200 shadow-md': arg.isVoter, 'bg-green-50 border-green-200 opacity-70': !arg.isVoter && arg.status === 'addressed', 'bg-red-50 border-red-200': !arg.isVoter && arg.status === 'dropped', 'bg-white border-slate-200': !arg.isVoter && arg.status === 'open'}">
+                <div *ngIf="isLinkedToPrevious(arg)" class="absolute -left-3 top-4 w-3 h-[2px] bg-slate-300"></div>
+                <div *ngIf="editingId() !== arg.id" (click)="editArg(arg.id, $event)" class="text-sm text-slate-800 whitespace-pre-wrap cursor-text min-h-[1.5rem]">{{ arg.text }}</div>
+                <textarea *ngIf="editingId() === arg.id" [(ngModel)]="arg.text" (blur)="stopEditing()" (click)="$event.stopPropagation()" (keydown.enter)="$event.preventDefault(); stopEditing()" class="w-full text-sm p-1 border rounded focus:ring-2 focus:ring-blue-500 bg-white" autoFocus></textarea>
+                <div class="mt-2 flex justify-between items-center opacity-0 group-hover/card:opacity-100 transition-opacity">
+                  <div class="flex gap-1 items-center">
+                    <button (click)="setDrop(arg); $event.stopPropagation()" title="Drop" class="p-1 hover:text-red-600 text-slate-400"><span class="font-bold text-xs">✕</span></button>
+                    <button (click)="setAddressed(arg); $event.stopPropagation()" title="Address" class="p-1 hover:text-green-600 text-slate-400"><span class="font-bold text-xs">✓</span></button>
+                    <div class="w-px h-3 bg-slate-200 mx-1"></div>
+                    <button (click)="toggleVoter(arg); $event.stopPropagation()" class="p-1 transition-colors" [class]="arg.isVoter ? 'text-purple-600' : 'text-slate-300 hover:text-purple-500'" title="Mark as Voting Issue"><svg xmlns="[http://www.w3.org/2000/svg](http://www.w3.org/2000/svg)" viewBox="0 0 24 24" fill="currentColor" class="w-4 h-4"><path fill-rule="evenodd" d="M10.788 3.21c.448-1.077 1.976-1.077 2.424 0l2.082 5.007 5.404.433c1.164.093 1.636 1.545.749 2.305l-4.117 3.527 1.257 5.273c.271 1.136-.964 2.033-1.96 1.425L12 18.354 7.373 21.18c-.996.608-2.231-.29-1.96-1.425l1.257-5.273-4.117-3.527c-.887-.76-.415-2.212.749-2.305l5.404-.433 2.082-5.006z" clip-rule="evenodd" /></svg></button>
+                    <div class="w-px h-3 bg-slate-200 mx-1"></div>
+                    <button (click)="deleteArg(arg); $event.stopPropagation()" title="Delete" class="p-1 hover:text-slate-600 text-slate-300"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>
+                  </div>
+                  <div class="relative">
+                    <button *ngIf="i < columns.length - 1" (click)="toggleLinkMenu(arg.id, $event)" class="text-xs px-2 py-1 rounded border font-medium flex items-center gap-1 transition-colors" [ngClass]="col.isCx ? 'bg-amber-100 text-amber-700 border-amber-200 hover:bg-amber-200' : 'bg-blue-50 text-blue-600 border-blue-100 hover:bg-blue-100'" title="Link argument to previous point">Link ⤵</button>
+                     <div *ngIf="activeLinkId() === arg.id" (click)="$event.stopPropagation()" class="absolute right-0 top-full mt-1 w-36 bg-white rounded shadow-lg border border-slate-200 z-50 flex flex-col py-1">
+                      <button *ngFor="let target of getFutureColumns(i)" (click)="createLink(arg, target.idx)" class="text-left px-3 py-1.5 text-xs text-slate-700 hover:bg-blue-50 hover:text-blue-700 w-full">{{ target.name }}</button>
+                    </div>
+                  </div>
+                </div>
+                <div *ngIf="arg.status === 'dropped' && !arg.isVoter" class="absolute -top-2 -right-2 bg-red-500 text-white text-[10px] px-2 py-0.5 rounded-full font-bold shadow-sm z-10">DROP</div>
+                <div *ngIf="arg.isVoter" class="absolute -top-2 -right-2 bg-purple-600 text-white text-[10px] px-2 py-0.5 rounded-full font-bold shadow-sm z-10 flex items-center gap-1"><span>★</span> VOTER</div>
+                <div class="mt-1 pt-1 border-t border-slate-100/50">
+                   <input [(ngModel)]="arg.comments" (ngModelChange)="persistArgs()" placeholder="Add note..." class="w-full text-[10px] p-0.5 bg-transparent border-none focus:ring-0 placeholder:text-slate-300 text-slate-500 italic">
+                </div>
+              </div>
+              <div class="mt-2"><input type="text" [placeholder]="col.isCx ? '+ Note Admission...' : '+ New Point...'" (keydown.enter)="addArg($event, i)" class="w-full text-xs p-2 bg-transparent border border-dashed border-slate-300 rounded hover:bg-white focus:ring-2 focus:ring-blue-500 transition-all" aria-label="Add new argument"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  \`
+})
+export class FlowComponent {
+  tournament = inject(TournamentService);
+  columns: ColumnDef[] = [
+    { id: '1AC', name: '1. Affirmative Constructive', isCx: false },
+    { id: 'CX1', name: 'Cross-Ex (Neg Questions)', isCx: true },
+    { id: '1NC', name: '2. Negative Constructive', isCx: false },
+    { id: 'CX2', name: 'Cross-Ex (Aff Questions)', isCx: true },
+    { id: '1AR', name: '3. 1st Affirmative Rebuttal', isCx: false },
+    { id: '2NR', name: '4. Negative Rebuttal', isCx: false },
+    { id: '2AR', name: '5. 2nd Affirmative Rebuttal', isCx: false }
+  ];
+  arguments = signal<DebateArgument[]>([]);
+  frameworks = signal<Record<string, FrameworkData>>({ '1AC': { value: '', criterion: '' }, '1NC': { value: '', criterion: '' } });
+  editingId = signal<string | null>(null);
+  activeLinkId = signal<string | null>(null);
+
+  constructor() {
+    this.loadData();
+    effect(() => {
+      localStorage.setItem('ld-flow-args', JSON.stringify(this.arguments()));
+      localStorage.setItem('ld-flow-frameworks', JSON.stringify(this.frameworks()));
+    });
+    effect(() => {
+      const activeId = this.tournament.activeDebateId();
+      const lastDebateId = localStorage.getItem('ld-current-debate-id');
+      if (activeId !== lastDebateId) {
+        this.internalReset();
+        if (activeId) localStorage.setItem('ld-current-debate-id', activeId);
+        else localStorage.removeItem('ld-current-debate-id');
+      }
+    }, { allowSignalWrites: true });
+  }
+
+  internalReset() {
+    this.arguments.set([]);
+    this.frameworks.set({ '1AC': { value: '', criterion: '' }, '1NC': { value: '', criterion: '' } });
+    this.editingId.set(null); this.activeLinkId.set(null);
+    localStorage.setItem('ld-flow-args', '[]');
+    localStorage.setItem('ld-flow-frameworks', JSON.stringify(this.frameworks()));
+  }
+
+  loadData() {
+    try {
+      const savedArgs = localStorage.getItem('ld-flow-args');
+      const savedFrames = localStorage.getItem('ld-flow-frameworks');
+      if (savedArgs) this.arguments.set(JSON.parse(savedArgs));
+      if (savedFrames) this.frameworks.set(JSON.parse(savedFrames));
+    } catch(e) { this.arguments.set([]); }
+  }
+
+  saveData() { localStorage.setItem('ld-flow-frameworks', JSON.stringify(this.frameworks())); }
+  persistArgs() { this.arguments.update(a => [...a]); }
+  toggleVoter(arg: DebateArgument) { this.arguments.update(args => args.map(a => a.id === arg.id ? { ...a, isVoter: !a.isVoter } : a)); }
+  createLink(originalArg: DebateArgument, targetIdx: number) { 
+    this.updateArgStatus(originalArg.id, 'addressed');
+    const isSkip = targetIdx > originalArg.colIdx + 1;
+    const sourceName = this.columns[originalArg.colIdx].id; 
+    const sourceIsCx = this.columns[originalArg.colIdx].isCx;
+    let prefix = 'Ref:';
+    if (sourceIsCx) prefix = 'Grant in CX:'; else if (isSkip) prefix = \`Ref (\${sourceName}):\`;
+    this.arguments.update(args => [...args, { id: crypto.randomUUID(), text: \`\${prefix} "\${originalArg.text.substring(0, 15)}..."\`, colIdx: targetIdx, status: 'open', parentId: originalArg.id, isVoter: false, comments: '' }]);
+    this.activeLinkId.set(null);
+  }
+  addArg(event: any, colIdx: number) { 
+    const text = event.target.value.trim();
+    if (!text) return;
+    this.arguments.update(args => [...args, { id: crypto.randomUUID(), text, colIdx, status: 'open', parentId: null, isVoter: false, comments: '' }]);
+    event.target.value = '';
+  }
+  getArgsForCol(idx: number) { return this.arguments().filter(a => a.colIdx === idx); }
+  getFutureColumns(currentIdx: number) { return this.columns.map((col, idx) => ({ name: col.id, isCx: col.isCx, idx })).filter(c => c.idx > currentIdx); }
+  isLinkedToPrevious(arg: DebateArgument): boolean { if (!arg.parentId) return false; const parent = this.arguments().find(a => a.id === arg.parentId); return parent ? (arg.colIdx === parent.colIdx + 1) : false; }
+  toggleLinkMenu(id: string, e: Event) { e.stopPropagation(); this.activeLinkId.set(this.activeLinkId() === id ? null : id); }
+  closeMenus() { this.activeLinkId.set(null); }
+  deleteArg(arg: DebateArgument) { if (confirm('Delete note?')) this.arguments.update(args => args.filter(a => a.id !== arg.id)); }
+  setDrop(arg: DebateArgument) { this.updateArgStatus(arg.id, 'dropped'); }
+  setAddressed(arg: DebateArgument) { this.updateArgStatus(arg.id, 'addressed'); }
+  updateArgStatus(id: string, status: any) { this.arguments.update(args => args.map(a => a.id === id ? { ...a, status } : a)); }
+  editArg(id: string, e: Event) { e.stopPropagation(); this.editingId.set(id); }
+  stopEditing() { this.editingId.set(null); }
+  resetFlow() { if(confirm('Clear all notes?')) this.internalReset(); }
 }`
   }
 ];

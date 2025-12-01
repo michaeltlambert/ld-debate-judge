@@ -12,16 +12,16 @@ import { TournamentService, Debate, RoundType, RoundStage, UserProfile } from '.
       <header class="max-w-7xl mx-auto mb-8 flex justify-between items-center">
         <div>
           <h1 class="text-2xl font-bold text-slate-900">{{ tournament.tournamentName() }}</h1>
-          <p class="text-slate-500">Code: <span class="font-mono font-bold text-blue-600">{{ tournament.tournamentId() }}</span></p>
+          <p class="text-slate-500">Code: <span class="font-mono font-bold text-blue-600" title="Copy to share">{{ tournament.tournamentId() }}</span></p>
         </div>
         <div class="flex items-center gap-4">
-           <button (click)="backToList()" class="text-sm font-bold text-slate-500 hover:text-slate-800 underline">Switch Tournament</button>
+           <button (click)="backToList()" class="text-sm font-bold text-slate-500 hover:text-slate-800 underline" title="Switch Tournament">Switch Tournament</button>
            
            <!-- Close Tournament -->
-           <button *ngIf="!tournament.isTournamentClosed()" (click)="closeTournament()" class="text-xs font-bold bg-red-50 text-red-600 px-3 py-2 rounded hover:bg-red-100 transition-colors border border-red-100">End Tournament</button>
+           <button *ngIf="!tournament.isTournamentClosed()" (click)="closeTournament()" class="text-xs font-bold bg-red-50 text-red-600 px-3 py-2 rounded hover:bg-red-100 transition-colors border border-red-100" title="End Tournament">End Tournament</button>
            <div *ngIf="tournament.isTournamentClosed()" class="text-xs font-bold bg-gray-100 text-gray-500 px-3 py-2 rounded border border-gray-200">ARCHIVED</div>
            
-           <button (click)="tournament.logout()" class="text-sm font-bold text-red-500 hover:text-red-700 underline ml-4">Log Out</button>
+           <button (click)="tournament.logout()" class="text-sm font-bold text-red-500 hover:text-red-700 underline ml-4" title="Log Out">Log Out</button>
         </div>
       </header>
 
@@ -31,6 +31,11 @@ import { TournamentService, Debate, RoundType, RoundStage, UserProfile } from '.
 
       <main class="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8">
         
+        <div class="col-span-12 flex gap-4 mb-4 border-b border-slate-200">
+            <button (click)="activeTab.set('Dashboard')" [class.border-slate-800]="activeTab()==='Dashboard'" class="pb-2 border-b-2 border-transparent font-bold text-sm">Rounds</button>
+            <button (click)="activeTab.set('Bracket')" [class.border-slate-800]="activeTab()==='Bracket'" class="pb-2 border-b-2 border-transparent font-bold text-sm">Bracket</button>
+        </div>
+
         <!-- DASHBOARD TAB -->
         <div *ngIf="activeTab() === 'Dashboard'" class="contents">
              <div class="lg:col-span-4 space-y-6">
@@ -55,12 +60,12 @@ import { TournamentService, Debate, RoundType, RoundStage, UserProfile } from '.
                         </select>
                       </div>
                       <div class="space-y-2">
-                        <select [(ngModel)]="selectedAffId" class="w-full p-2 border rounded text-sm bg-white"><option *ngFor="let d of tournament.debaters()" [value]="d.id">{{ d.name }}</option></select>
+                        <select [(ngModel)]="selectedAffId" class="w-full p-2 border rounded text-sm bg-white"><option *ngFor="let d of tournament.debaters()" [value]="d.id" [disabled]="d.status === 'Eliminated'" [class.text-red-400]="d.status === 'Eliminated'">{{ d.name }} {{ d.status === 'Eliminated' ? '(Eliminated)' : '' }}</option></select>
                       </div>
                       <div class="space-y-2">
-                        <select [(ngModel)]="selectedNegId" class="w-full p-2 border rounded text-sm bg-white"><option *ngFor="let d of tournament.debaters()" [value]="d.id">{{ d.name }}</option></select>
+                        <select [(ngModel)]="selectedNegId" class="w-full p-2 border rounded text-sm bg-white"><option *ngFor="let d of tournament.debaters()" [value]="d.id" [disabled]="d.status === 'Eliminated'" [class.text-red-400]="d.status === 'Eliminated'">{{ d.name }} {{ d.status === 'Eliminated' ? '(Eliminated)' : '' }}</option></select>
                       </div>
-                      <button (click)="create()" class="w-full bg-slate-900 text-white font-bold py-3 rounded-lg hover:bg-slate-800">Create Matchup</button>
+                      <button (click)="create()" class="w-full bg-slate-900 text-white font-bold py-3 rounded-lg hover:bg-slate-800" title="Create Matchup">Create Matchup</button>
                     </div>
                  </div>
                  
@@ -68,26 +73,21 @@ import { TournamentService, Debate, RoundType, RoundStage, UserProfile } from '.
                     <h2 class="font-bold text-slate-800 mb-4">Participants</h2>
                     <div class="max-h-64 overflow-y-auto space-y-2">
                          <div *ngFor="let d of tournament.debaters()" class="flex justify-between text-sm p-2 bg-slate-50 rounded">
-                             <span>{{ d.name }}</span>
+                             <span [class.line-through]="d.status === 'Eliminated'" [class.text-slate-400]="d.status === 'Eliminated'">{{ d.name }}</span>
                              <div class="flex gap-2">
-                                 <button *ngIf="!tournament.isTournamentClosed()" (click)="toggleStatus(d)">{{ d.status === 'Eliminated' ? '❤️' : '💀' }}</button>
-                                 <button *ngIf="!tournament.isTournamentClosed()" (click)="tournament.kickUser(d.id, 'Debater')" class="text-red-500">&times;</button>
+                                 <button *ngIf="!tournament.isTournamentClosed()" (click)="toggleStatus(d)" title="Toggle Status">{{ d.status === 'Eliminated' ? '❤️' : '💀' }}</button>
+                                 <button *ngIf="!tournament.isTournamentClosed()" (click)="tournament.kickUser(d.id, 'Debater')" class="text-red-500" title="Kick User">&times;</button>
                              </div>
                          </div>
                          <div *ngFor="let j of tournament.judges()" class="flex justify-between text-sm p-2 bg-slate-50 rounded">
                              <span>{{ j.name }} (J)</span>
-                             <button *ngIf="!tournament.isTournamentClosed()" (click)="tournament.kickUser(j.id, 'Judge')" class="text-red-500">&times;</button>
+                             <button *ngIf="!tournament.isTournamentClosed()" (click)="tournament.kickUser(j.id, 'Judge')" class="text-red-500" title="Kick User">&times;</button>
                          </div>
                     </div>
                  </div>
              </div>
              
              <div class="lg:col-span-8 space-y-6">
-                <div class="flex gap-4 mb-4 border-b border-slate-200">
-                    <button (click)="activeTab.set('Dashboard')" [class.border-slate-800]="activeTab()==='Dashboard'" class="pb-2 border-b-2 border-transparent font-bold text-sm">Rounds</button>
-                    <button (click)="activeTab.set('Bracket')" [class.border-slate-800]="activeTab()==='Bracket'" class="pb-2 border-b-2 border-transparent font-bold text-sm">Bracket</button>
-                </div>
-
                 <div *ngFor="let debate of tournament.debates()" class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 mb-4">
                      <div class="flex justify-between items-start mb-4 border-b border-slate-100 pb-3">
                         <div>
@@ -105,7 +105,7 @@ import { TournamentService, Debate, RoundType, RoundStage, UserProfile } from '.
                                     <option *ngFor="let judge of getUnassignedJudges(debate)" [value]="judge.id">{{ judge.name }}</option>
                                 </select>
                             </div>
-                            <button *ngIf="debate.status === 'Open'" (click)="tournament.finalizeRound(debate.id)" class="bg-slate-800 text-white text-xs font-bold px-3 py-2 rounded hover:bg-slate-900">Finalize</button>
+                            <button *ngIf="debate.status === 'Open'" (click)="tournament.finalizeRound(debate.id)" class="bg-slate-800 text-white text-xs font-bold px-3 py-2 rounded hover:bg-slate-900" title="Finalize Round">Finalize</button>
                             <button (click)="tournament.deleteDebate(debate.id)" class="text-slate-300 hover:text-red-500 p-2" title="Delete Debate"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" /></svg></button>
                         </div>
                      </div>
@@ -113,7 +113,7 @@ import { TournamentService, Debate, RoundType, RoundStage, UserProfile } from '.
                         <div *ngFor="let judgeId of debate.judgeIds" class="bg-slate-50 rounded-lg p-3 border border-slate-200 relative group">
                             <div class="flex justify-between items-center mb-1">
                                 <span class="text-xs font-bold text-slate-700 flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-green-500"></span> {{ getJudgeName(judgeId) }}</span>
-                                <button *ngIf="debate.status === 'Open' && !tournament.isTournamentClosed()" (click)="remove(debate.id, judgeId)" class="text-slate-300 hover:text-red-500 font-bold text-xs">Remove</button>
+                                <button *ngIf="debate.status === 'Open' && !tournament.isTournamentClosed()" (click)="remove(debate.id, judgeId)" class="text-slate-300 hover:text-red-500 font-bold text-xs" title="Unassign Judge">Remove</button>
                             </div>
                             <div *ngIf="getResult(debate.id, judgeId) as res; else pending" class="animate-in fade-in bg-white p-2 rounded border border-slate-100 mt-2">
                                 <div class="flex justify-between text-xs font-bold mb-1">
@@ -127,7 +127,7 @@ import { TournamentService, Debate, RoundType, RoundStage, UserProfile } from '.
                             <ng-template #pending>
                                 <div class="flex items-center justify-between w-full mt-2 pl-2">
                                     <span class="text-[10px] text-slate-400">Pending...</span>
-                                    <button *ngIf="!tournament.isTournamentClosed()" (click)="tournament.sendNudge(judgeId)" class="text-[10px] bg-amber-100 text-amber-700 px-2 py-1 rounded hover:bg-amber-200 font-bold flex items-center gap-1">🔔 Nudge</button>
+                                    <button *ngIf="!tournament.isTournamentClosed()" (click)="tournament.sendNudge(judgeId)" class="text-[10px] bg-amber-100 text-amber-700 px-2 py-1 rounded hover:bg-amber-200 font-bold flex items-center gap-1" title="Send reminder notification">🔔 Nudge</button>
                                 </div>
                             </ng-template>
                         </div>
@@ -138,24 +138,18 @@ import { TournamentService, Debate, RoundType, RoundStage, UserProfile } from '.
         </div>
 
         <!-- BRACKET TAB -->
-        <div *ngIf="activeTab() === 'Bracket'" class="lg:col-span-12">
-           <div class="flex gap-4 mb-4 border-b border-slate-200">
-               <button (click)="activeTab.set('Dashboard')" class="pb-2 border-b-2 border-transparent font-bold text-sm">Rounds</button>
-               <button (click)="activeTab.set('Bracket')" class="pb-2 border-b-2 border-slate-800 font-bold text-sm">Bracket</button>
-           </div>
-           <div class="w-full overflow-x-auto pb-8">
-               <div class="flex gap-8 min-w-max">
-                  <div *ngFor="let stage of bracketStages" class="w-64 flex-none space-y-4">
-                      <h3 class="font-bold text-center text-slate-500 uppercase tracking-widest text-xs mb-4 sticky top-0 bg-slate-100 py-2">{{ stage }}</h3>
-                      <div *ngFor="let d of getDebatesForStage(stage)" class="bg-white border border-slate-200 rounded-lg shadow-sm p-3 relative">
-                          <div class="text-[10px] text-slate-400 mb-2 truncate font-mono">{{ d.topic }}</div>
-                          <div class="space-y-1">
-                             <div class="flex justify-between p-1 rounded text-xs font-bold" [class.bg-green-100]="d.status === 'Closed' && getWinner(d.id) === 'Aff'"><span>{{ d.affName }}</span><span *ngIf="d.status === 'Closed' && getWinner(d.id) === 'Aff'">✓</span></div>
-                             <div class="flex justify-between p-1 rounded text-xs font-bold" [class.bg-green-100]="d.status === 'Closed' && getWinner(d.id) === 'Neg'"><span>{{ d.negName }}</span><span *ngIf="d.status === 'Closed' && getWinner(d.id) === 'Neg'">✓</span></div>
-                          </div>
+        <div *ngIf="activeTab() === 'Bracket'" class="col-span-12 lg:col-span-12 w-full overflow-x-auto pb-8">
+           <div class="flex gap-8 min-w-max">
+              <div *ngFor="let stage of bracketStages" class="w-64 flex-none space-y-4">
+                  <h3 class="font-bold text-center text-slate-500 uppercase tracking-widest text-xs mb-4 sticky top-0 bg-slate-100 py-2">{{ stage }}</h3>
+                  <div *ngFor="let d of getDebatesForStage(stage)" class="bg-white border border-slate-200 rounded-lg shadow-sm p-3 relative">
+                      <div class="text-[10px] text-slate-400 mb-2 truncate font-mono">{{ d.topic }}</div>
+                      <div class="space-y-1">
+                         <div class="flex justify-between p-1 rounded text-xs font-bold" [class.bg-green-100]="d.status === 'Closed' && getWinner(d.id) === 'Aff'"><span>{{ d.affName }}</span><span *ngIf="d.status === 'Closed' && getWinner(d.id) === 'Aff'">✓</span></div>
+                         <div class="flex justify-between p-1 rounded text-xs font-bold" [class.bg-green-100]="d.status === 'Closed' && getWinner(d.id) === 'Neg'"><span>{{ d.negName }}</span><span *ngIf="d.status === 'Closed' && getWinner(d.id) === 'Neg'">✓</span></div>
                       </div>
                   </div>
-               </div>
+              </div>
            </div>
         </div>
       </main>
