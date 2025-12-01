@@ -29,12 +29,24 @@ import { TournamentService, RoundResult } from './tournament.service';
           </div>
 
           <div class="grid grid-cols-2 gap-6 mb-6">
-             <input type="number" [(ngModel)]="affPoints" [disabled]="isLocked()" class="border p-2 rounded text-center font-bold text-xl">
-             <input type="number" [(ngModel)]="negPoints" [disabled]="isLocked()" class="border p-2 rounded text-center font-bold text-xl">
+             <div>
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-1 text-center">Aff ({{ currentDebate()?.affName }})</label>
+                <input type="number" [(ngModel)]="affPoints" [disabled]="isLocked()" class="w-full border p-2 rounded text-center font-bold text-xl">
+             </div>
+             <div>
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-1 text-center">Neg ({{ currentDebate()?.negName }})</label>
+                <input type="number" [(ngModel)]="negPoints" [disabled]="isLocked()" class="w-full border p-2 rounded text-center font-bold text-xl">
+             </div>
           </div>
           <div class="flex gap-4 mb-6">
-             <button (click)="!isLocked() && decision.set('Aff')" [class]="decision() === 'Aff' ? 'bg-blue-600 text-white' : 'bg-slate-100'" class="flex-1 py-3 rounded font-bold">Affirmative</button>
-             <button (click)="!isLocked() && decision.set('Neg')" [class]="decision() === 'Neg' ? 'bg-red-600 text-white' : 'bg-slate-100'" class="flex-1 py-3 rounded font-bold">Negative</button>
+             <button (click)="!isLocked() && decision.set('Aff')" [class]="decision() === 'Aff' ? 'bg-blue-600 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'" class="flex-1 py-4 rounded-xl font-bold transition-all flex flex-col items-center justify-center">
+                <span class="text-xs uppercase opacity-70">Affirmative</span>
+                <span class="text-lg">{{ currentDebate()?.affName }}</span>
+             </button>
+             <button (click)="!isLocked() && decision.set('Neg')" [class]="decision() === 'Neg' ? 'bg-red-600 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'" class="flex-1 py-4 rounded-xl font-bold transition-all flex flex-col items-center justify-center">
+                <span class="text-xs uppercase opacity-70">Negative</span>
+                <span class="text-lg">{{ currentDebate()?.negName }}</span>
+             </button>
           </div>
           <textarea [(ngModel)]="rfdText" [disabled]="isLocked()" class="w-full h-32 border rounded p-2 text-sm" placeholder="Reason for Decision"></textarea>
           <button *ngIf="!isLocked()" (click)="submitRound()" class="w-full mt-4 bg-slate-900 text-white font-bold py-3 rounded hover:bg-slate-800" title="Submit Ballot">Submit Ballot</button>
@@ -56,6 +68,9 @@ export class BallotComponent {
   
   // Re-added missing signal
   showHints = signal(true);
+
+  // ADDED: Computed signal for current debate info
+  currentDebate = computed(() => this.tournament.debates().find(d => d.id === this.tournament.activeDebateId()));
 
   constructor() {
     effect(() => {

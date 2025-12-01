@@ -6,8 +6,7 @@ import {
 } from 'firebase/firestore';
 import { 
   getAuth, signInAnonymously, onAuthStateChanged, 
-  User, signInWithCustomToken, signOut, GoogleAuthProvider, FacebookAuthProvider, 
-  signInWithPopup, signInWithRedirect, getRedirectResult,
+  User, signInWithCustomToken, signOut, 
   createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile
 } from 'firebase/auth';
 import { AppConfig } from './config';
@@ -99,6 +98,7 @@ export class TournamentService {
   
   // Admin: List of owned tournaments
   myTournaments = signal<TournamentMeta[]>([]);
+  
   currentTournamentStatus = computed(() => {
       const tid = this.tournamentId();
       return this.myTournaments().find(t => t.id === tid)?.status || 'Active';
@@ -160,17 +160,6 @@ export class TournamentService {
   }
 
   private async initAuth() {
-    try {
-      const redirectResult = await getRedirectResult(this.auth);
-      if (redirectResult?.user) {
-        this.user.set(redirectResult.user);
-        if (!this.restoreSession(redirectResult.user.uid)) {
-           this.recoverProfile(redirectResult.user.uid);
-        }
-        return;
-      }
-    } catch(e) { console.warn("Redirect Result check failed:", e); }
-
     const initialToken = (window as any).__initial_auth_token;
     if (initialToken && !this.auth.currentUser) await signInWithCustomToken(this.auth, initialToken);
 

@@ -43,10 +43,12 @@ import { TournamentService, Debate, RoundType, RoundStage, UserProfile, RoundRes
            <div class="grid grid-cols-2 gap-4 mb-4">
               <div class="p-3 rounded bg-blue-50 text-center border border-blue-100">
                   <div class="text-xs font-bold text-blue-600 uppercase">Affirmative</div>
+                  <div class="text-xs text-blue-800 font-medium mb-1 truncate">{{ getDebate(selectedBallot()?.debateId)?.affName }}</div>
                   <div class="text-2xl font-bold text-slate-800">{{ selectedBallot()?.affScore }}</div>
               </div>
               <div class="p-3 rounded bg-red-50 text-center border border-red-100">
                   <div class="text-xs font-bold text-red-600 uppercase">Negative</div>
+                   <div class="text-xs text-red-800 font-medium mb-1 truncate">{{ getDebate(selectedBallot()?.debateId)?.negName }}</div>
                   <div class="text-2xl font-bold text-slate-800">{{ selectedBallot()?.negScore }}</div>
               </div>
            </div>
@@ -98,10 +100,12 @@ import { TournamentService, Debate, RoundType, RoundStage, UserProfile, RoundRes
                         </select>
                       </div>
                       <div class="space-y-2">
-                        <select [(ngModel)]="selectedAffId" class="w-full p-2 border rounded text-sm bg-white"><option *ngFor="let d of tournament.debaters()" [value]="d.id" [disabled]="d.status === 'Eliminated'" [class.text-red-400]="d.status === 'Eliminated'">{{ d.name }} {{ d.status === 'Eliminated' ? '(Eliminated)' : '' }}</option></select>
+                        <label class="block text-xs font-bold text-blue-600 uppercase mb-1">Affirmative</label>
+                        <select [(ngModel)]="selectedAffId" class="w-full p-2 border rounded text-sm bg-white"><option value="" disabled selected>Select Debater...</option><option *ngFor="let d of tournament.debaters()" [value]="d.id" [disabled]="d.status === 'Eliminated'" [class.text-red-400]="d.status === 'Eliminated'">{{ d.name }} {{ d.status === 'Eliminated' ? '(Eliminated)' : '' }}</option></select>
                       </div>
                       <div class="space-y-2">
-                        <select [(ngModel)]="selectedNegId" class="w-full p-2 border rounded text-sm bg-white"><option *ngFor="let d of tournament.debaters()" [value]="d.id" [disabled]="d.status === 'Eliminated'" [class.text-red-400]="d.status === 'Eliminated'">{{ d.name }} {{ d.status === 'Eliminated' ? '(Eliminated)' : '' }}</option></select>
+                        <label class="block text-xs font-bold text-red-600 uppercase mb-1">Negative</label>
+                        <select [(ngModel)]="selectedNegId" class="w-full p-2 border rounded text-sm bg-white"><option value="" disabled selected>Select Debater...</option><option *ngFor="let d of tournament.debaters()" [value]="d.id" [disabled]="d.status === 'Eliminated'" [class.text-red-400]="d.status === 'Eliminated'">{{ d.name }} {{ d.status === 'Eliminated' ? '(Eliminated)' : '' }}</option></select>
                       </div>
                       <button (click)="create()" class="w-full bg-slate-900 text-white font-bold py-3 rounded-lg hover:bg-slate-800" title="Create Matchup">Create Matchup</button>
                     </div>
@@ -236,4 +240,5 @@ export class AdminComponent {
   getJudgeName(id: string) { return this.tournament.judges().find(j => j.id === id)?.name || 'Unknown'; }
   getUnassignedJudges(debate: Debate) { return this.tournament.judges().filter(j => !debate.judgeIds.includes(j.id)); }
   getResult(debateId: string, judgeId: string) { return this.tournament.results().find(r => r.debateId === debateId && r.judgeId === judgeId); }
+  getDebate(id: string | undefined) { return this.tournament.debates().find(d => d.id === id); }
 }

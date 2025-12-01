@@ -44,12 +44,15 @@ body {
     content: `# DebateMate: Tournament Edition
 
 ## 📘 Project Overview
-DebateMate is a real-time Lincoln-Douglas adjudication system.
+DebateMate is a real-time Lincoln-Douglas adjudication system designed for high usability and strict tournament management.
 
 ### **Features**
-* **Multi-Tournament:** Admins can manage multiple events.
-* **Real-Time Flow:** Judges and Debaters can track arguments and add comments.
-* **Strict Scoring:** Ballots calculate winners automatically based on points.
+* **Multi-Tournament Architecture:** Admins can create, switch between, and archive multiple independent tournaments.
+* **Strict Authentication:** Secure Email/Password login with persistent user profiles.
+* **Real-Time Flow:** Judges and Debaters can track arguments and add comments live.
+* **Automated Scoring:** Ballots automatically determine the winner based on point totals.
+* **Tournament Brackets:** Visual tracking of elimination rounds.
+* **PDF Export:** Judges can download their flow and ballot for records.
 
 ## 🔧 Configuration
 Update \`src/app/config.ts\` with your API Keys.
@@ -107,6 +110,72 @@ bootstrapApplication(AppComponent)
 };`
   },
   {
+    path: 'src/app/debate.service.ts',
+    content: `import { Injectable, signal } from '@angular/core';
+
+export interface Phase {
+  id: string; name: string; time: number; hint: string;
+}
+
+export type TimerType = 'SPEECH' | 'AFF_PREP' | 'NEG_PREP' | 'IDLE';
+
+@Injectable({ providedIn: 'root' })
+export class DebateService {
+  readonly PREP_ALLOWANCE = 240; 
+  readonly phases: Phase[] = [
+    { id: '1AC', name: 'Affirmative Constructive', time: 360, hint: 'Aff presents Value, Criterion, and Contentions.' },
+    { id: 'CX1', name: 'Cross-Ex (Neg Questions)', time: 180, hint: 'Neg clarifies arguments. No new arguments.' },
+    { id: '1NC', name: 'Negative Constructive', time: 420, hint: 'Neg presents case and attacks Aff.' },
+    { id: 'CX2', name: 'Cross-Ex (Aff Questions)', time: 180, hint: 'Aff questions Neg. Look for contradictions.' },
+    { id: '1AR', name: '1st Aff Rebuttal', time: 240, hint: 'Aff must answer ALL Neg attacks here.' },
+    { id: '2NR', name: 'Negative Rebuttal', time: 360, hint: 'Neg closing speech. Crystallize voting issues.' },
+    { id: '2AR', name: '2nd Aff Rebuttal', time: 180, hint: 'Aff closing speech. Explain why Aff wins.' },
+  ];
+
+  currentPhase = signal<Phase>(this.phases[0]);
+  speechTimer = signal<number>(360);
+  affPrep = signal<number>(this.PREP_ALLOWANCE);
+  negPrep = signal<number>(this.PREP_ALLOWANCE);
+  activeTimer = signal<TimerType>('IDLE');
+  private intervalId: any;
+
+  constructor() {
+    this.intervalId = setInterval(() => { this.tick(); }, 1000);
+  }
+
+  private tick() {
+    const type = this.activeTimer();
+    if (type === 'SPEECH') {
+      if (this.speechTimer() > 0) this.speechTimer.update(t => t - 1);
+      else this.stop();
+    } else if (type === 'AFF_PREP') {
+      if (this.affPrep() > 0) this.affPrep.update(t => t - 1);
+      else this.stop();
+    } else if (type === 'NEG_PREP') {
+      if (this.negPrep() > 0) this.negPrep.update(t => t - 1);
+      else this.stop();
+    }
+  }
+
+  toggleSpeech() { this.activeTimer() === 'SPEECH' ? this.stop() : this.activeTimer.set('SPEECH'); }
+  toggleAffPrep() { this.activeTimer() === 'AFF_PREP' ? this.stop() : this.activeTimer.set('AFF_PREP'); }
+  toggleNegPrep() { this.activeTimer() === 'NEG_PREP' ? this.stop() : this.activeTimer.set('NEG_PREP'); }
+  stop() { this.activeTimer.set('IDLE'); }
+  
+  setPhase(phase: Phase) {
+    this.stop();
+    this.currentPhase.set(phase);
+    this.speechTimer.set(phase.time);
+  }
+
+  formatTime(seconds: number): string {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return \`\${m}:\${s < 10 ? '0' : ''}\${s}\`;
+  }
+}`
+  },
+  {
     path: 'src/app/tournament.service.ts',
     content: `import { Injectable, signal, computed } from '@angular/core';
 import { initializeApp } from 'firebase/app';
@@ -116,8 +185,7 @@ import {
 } from 'firebase/firestore';
 import { 
   getAuth, signInAnonymously, onAuthStateChanged, 
-  User, signInWithCustomToken, signOut, GoogleAuthProvider, FacebookAuthProvider, 
-  signInWithPopup, signInWithRedirect, getRedirectResult,
+  User, signInWithCustomToken, signOut, 
   createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile
 } from 'firebase/auth';
 import { AppConfig } from './config';
@@ -209,6 +277,7 @@ export class TournamentService {
   
   // Admin: List of owned tournaments
   myTournaments = signal<TournamentMeta[]>([]);
+  
   currentTournamentStatus = computed(() => {
       const tid = this.tournamentId();
       return this.myTournaments().find(t => t.id === tid)?.status || 'Active';
@@ -270,17 +339,6 @@ export class TournamentService {
   }
 
   private async initAuth() {
-    try {
-      const redirectResult = await getRedirectResult(this.auth);
-      if (redirectResult?.user) {
-        this.user.set(redirectResult.user);
-        if (!this.restoreSession(redirectResult.user.uid)) {
-           this.recoverProfile(redirectResult.user.uid);
-        }
-        return;
-      }
-    } catch(e) { console.warn("Redirect Result check failed:", e); }
-
     const initialToken = (window as any).__initial_auth_token;
     if (initialToken && !this.auth.currentUser) await signInWithCustomToken(this.auth, initialToken);
 
@@ -834,6 +892,7 @@ export class LoginComponent {
       this.loading = true;
       this.errorMsg = '';
 
+      // Validation
       if (!this.email.includes('@')) {
           this.errorMsg = "Please enter a valid email.";
           this.loading = false;
@@ -1127,10 +1186,12 @@ import { TournamentService, Debate, RoundType, RoundStage, UserProfile, RoundRes
            <div class="grid grid-cols-2 gap-4 mb-4">
               <div class="p-3 rounded bg-blue-50 text-center border border-blue-100">
                   <div class="text-xs font-bold text-blue-600 uppercase">Affirmative</div>
+                  <div class="text-xs text-blue-800 font-medium mb-1 truncate">{{ getDebate(selectedBallot()?.debateId)?.affName }}</div>
                   <div class="text-2xl font-bold text-slate-800">{{ selectedBallot()?.affScore }}</div>
               </div>
               <div class="p-3 rounded bg-red-50 text-center border border-red-100">
                   <div class="text-xs font-bold text-red-600 uppercase">Negative</div>
+                   <div class="text-xs text-red-800 font-medium mb-1 truncate">{{ getDebate(selectedBallot()?.debateId)?.negName }}</div>
                   <div class="text-2xl font-bold text-slate-800">{{ selectedBallot()?.negScore }}</div>
               </div>
            </div>
@@ -1182,10 +1243,12 @@ import { TournamentService, Debate, RoundType, RoundStage, UserProfile, RoundRes
                         </select>
                       </div>
                       <div class="space-y-2">
-                        <select [(ngModel)]="selectedAffId" class="w-full p-2 border rounded text-sm bg-white"><option *ngFor="let d of tournament.debaters()" [value]="d.id" [disabled]="d.status === 'Eliminated'" [class.text-red-400]="d.status === 'Eliminated'">{{ d.name }} {{ d.status === 'Eliminated' ? '(Eliminated)' : '' }}</option></select>
+                        <label class="block text-xs font-bold text-blue-600 uppercase mb-1">Affirmative</label>
+                        <select [(ngModel)]="selectedAffId" class="w-full p-2 border rounded text-sm bg-white"><option value="" disabled selected>Select Debater...</option><option *ngFor="let d of tournament.debaters()" [value]="d.id" [disabled]="d.status === 'Eliminated'" [class.text-red-400]="d.status === 'Eliminated'">{{ d.name }} {{ d.status === 'Eliminated' ? '(Eliminated)' : '' }}</option></select>
                       </div>
                       <div class="space-y-2">
-                        <select [(ngModel)]="selectedNegId" class="w-full p-2 border rounded text-sm bg-white"><option *ngFor="let d of tournament.debaters()" [value]="d.id" [disabled]="d.status === 'Eliminated'" [class.text-red-400]="d.status === 'Eliminated'">{{ d.name }} {{ d.status === 'Eliminated' ? '(Eliminated)' : '' }}</option></select>
+                        <label class="block text-xs font-bold text-red-600 uppercase mb-1">Negative</label>
+                        <select [(ngModel)]="selectedNegId" class="w-full p-2 border rounded text-sm bg-white"><option value="" disabled selected>Select Debater...</option><option *ngFor="let d of tournament.debaters()" [value]="d.id" [disabled]="d.status === 'Eliminated'" [class.text-red-400]="d.status === 'Eliminated'">{{ d.name }} {{ d.status === 'Eliminated' ? '(Eliminated)' : '' }}</option></select>
                       </div>
                       <button (click)="create()" class="w-full bg-slate-900 text-white font-bold py-3 rounded-lg hover:bg-slate-800" title="Create Matchup">Create Matchup</button>
                     </div>
@@ -1320,6 +1383,7 @@ export class AdminComponent {
   getJudgeName(id: string) { return this.tournament.judges().find(j => j.id === id)?.name || 'Unknown'; }
   getUnassignedJudges(debate: Debate) { return this.tournament.judges().filter(j => !debate.judgeIds.includes(j.id)); }
   getResult(debateId: string, judgeId: string) { return this.tournament.results().find(r => r.debateId === debateId && r.judgeId === judgeId); }
+  getDebate(id: string | undefined) { return this.tournament.debates().find(d => d.id === id); }
 }`
   },
   {
@@ -1355,12 +1419,24 @@ import { TournamentService, RoundResult } from './tournament.service';
           </div>
 
           <div class="grid grid-cols-2 gap-6 mb-6">
-             <input type="number" [(ngModel)]="affPoints" [disabled]="isLocked()" class="border p-2 rounded text-center font-bold text-xl">
-             <input type="number" [(ngModel)]="negPoints" [disabled]="isLocked()" class="border p-2 rounded text-center font-bold text-xl">
+             <div>
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-1 text-center">Aff ({{ currentDebate()?.affName }})</label>
+                <input type="number" [(ngModel)]="affPoints" [disabled]="isLocked()" class="w-full border p-2 rounded text-center font-bold text-xl">
+             </div>
+             <div>
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-1 text-center">Neg ({{ currentDebate()?.negName }})</label>
+                <input type="number" [(ngModel)]="negPoints" [disabled]="isLocked()" class="w-full border p-2 rounded text-center font-bold text-xl">
+             </div>
           </div>
           <div class="flex gap-4 mb-6">
-             <button (click)="!isLocked() && decision.set('Aff')" [class]="decision() === 'Aff' ? 'bg-blue-600 text-white' : 'bg-slate-100'" class="flex-1 py-3 rounded font-bold">Affirmative</button>
-             <button (click)="!isLocked() && decision.set('Neg')" [class]="decision() === 'Neg' ? 'bg-red-600 text-white' : 'bg-slate-100'" class="flex-1 py-3 rounded font-bold">Negative</button>
+             <button (click)="!isLocked() && decision.set('Aff')" [class]="decision() === 'Aff' ? 'bg-blue-600 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'" class="flex-1 py-4 rounded-xl font-bold transition-all flex flex-col items-center justify-center">
+                <span class="text-xs uppercase opacity-70">Affirmative</span>
+                <span class="text-lg">{{ currentDebate()?.affName }}</span>
+             </button>
+             <button (click)="!isLocked() && decision.set('Neg')" [class]="decision() === 'Neg' ? 'bg-red-600 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'" class="flex-1 py-4 rounded-xl font-bold transition-all flex flex-col items-center justify-center">
+                <span class="text-xs uppercase opacity-70">Negative</span>
+                <span class="text-lg">{{ currentDebate()?.negName }}</span>
+             </button>
           </div>
           <textarea [(ngModel)]="rfdText" [disabled]="isLocked()" class="w-full h-32 border rounded p-2 text-sm" placeholder="Reason for Decision"></textarea>
           <button *ngIf="!isLocked()" (click)="submitRound()" class="w-full mt-4 bg-slate-900 text-white font-bold py-3 rounded hover:bg-slate-800" title="Submit Ballot">Submit Ballot</button>
@@ -1382,6 +1458,9 @@ export class BallotComponent {
   
   // Re-added missing signal
   showHints = signal(true);
+
+  // ADDED: Computed signal for current debate info
+  currentDebate = computed(() => this.tournament.debates().find(d => d.id === this.tournament.activeDebateId()));
 
   constructor() {
     effect(() => {
