@@ -10,6 +10,7 @@ DebateMate is a real-time Lincoln-Douglas adjudication system designed for high 
 * **Automated Scoring:** Ballots automatically determine the winner based on point totals.
 * **Tournament Brackets:** Visual tracking of elimination rounds.
 * **PDF Export:** Judges can download their flow and ballot for records.
+* **Historical Records:** Judges can view past ballots and flow sheets from their profile.
 
 ## 🔧 Configuration
 Update `src/app/config.ts` with your API Keys.

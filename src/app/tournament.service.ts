@@ -11,10 +11,13 @@ import {
 } from 'firebase/auth';
 import { AppConfig } from './config';
 
-// --- DATA MODELS ---
-
 export type RoundType = 'Prelim' | 'Elimination';
 export type RoundStage = string;
+
+export interface DebateArgument {
+  id: string; text: string; colIdx: number; status: 'open' | 'addressed' | 'dropped'; parentId: string | null; isVoter?: boolean; comments?: string;
+}
+export interface FrameworkData { value: string; criterion: string; }
 
 export interface TournamentMeta {
   id: string;
@@ -62,6 +65,8 @@ export interface RoundResult {
   decision: 'Aff' | 'Neg';
   rfd: string;
   timestamp: number;
+  flow?: DebateArgument[]; 
+  frameworks?: Record<string, FrameworkData>;
 }
 
 export interface DebaterStats {
@@ -96,7 +101,6 @@ export class TournamentService {
   results = signal<RoundResult[]>([]);
   notifications = signal<Notification[]>([]);
   
-  // Admin: List of owned tournaments
   myTournaments = signal<TournamentMeta[]>([]);
   
   currentTournamentStatus = computed(() => {
@@ -107,6 +111,10 @@ export class TournamentService {
   isTournamentClosed = computed(() => this.currentTournamentStatus() === 'Closed');
   
   activeDebateId = signal<string | null>(null);
+  
+  // Current active flow state
+  currentFlow = signal<DebateArgument[]>([]);
+  currentFrameworks = signal<Record<string, FrameworkData>>({});
 
   standings = computed(() => {
     const stats: Record<string, DebaterStats> = {};
@@ -539,7 +547,11 @@ export class TournamentService {
     const tid = this.tournamentId();
     if (!tid) throw new Error("No tournament context.");
 
-    const finalResult = { ...result, tournamentId: tid, debateId, judgeId: uid, judgeName: name, timestamp: Date.now() };
+    // Include current flow if available
+    const flow = this.currentFlow();
+    const frameworks = this.currentFrameworks();
+
+    const finalResult = { ...result, tournamentId: tid, debateId, judgeId: uid, judgeName: name, timestamp: Date.now(), flow, frameworks };
     if (this.db) {
         const ballotId = `${debateId}_${uid}`;
         await setDoc(doc(this.db, 'artifacts', this.appId, 'public', 'data', 'results', ballotId), finalResult, { merge: true });
