@@ -384,7 +384,7 @@ export class TournamentService {
 
   private startListeners(tid: string) {
     if (!this.db) return;
-    this.stopListeners(); 
+    this.stopListeners(); // Clean up old tournament listeners
     
     const qJudges = query(this.getCollection('judges'), where('tournamentId', '==', tid));
     this.collectionUnsubscribes.push(onSnapshot(qJudges, (s) => this.judges.set(s.docs.map(d => ({id:d.id, ...d.data()} as UserProfile)))));

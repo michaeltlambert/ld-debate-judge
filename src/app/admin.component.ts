@@ -113,18 +113,32 @@ import { TournamentService, Debate, RoundType, RoundStage, UserProfile, RoundRes
                  
                  <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                     <h2 class="font-bold text-slate-800 mb-4">Participants</h2>
-                    <div class="max-h-64 overflow-y-auto space-y-2">
-                         <div *ngFor="let d of sortedDebaters()" class="flex justify-between text-sm p-2 bg-slate-50 rounded">
-                             <span [class.line-through]="d.status === 'Eliminated'" [class.text-slate-400]="d.status === 'Eliminated'">{{ d.name }} <span class="text-xs font-bold ml-1" [class.text-green-600]="d.status!=='Eliminated'">({{d.wins}}W - {{d.losses}}L)</span></span>
-                             <div class="flex gap-2">
-                                 <button *ngIf="!tournament.isTournamentClosed()" (click)="toggleStatus(d)" title="Toggle Status">{{ d.status === 'Eliminated' ? '❤️' : '💀' }}</button>
-                                 <button *ngIf="!tournament.isTournamentClosed()" (click)="tournament.kickUser(d.id, 'Debater')" class="text-red-500" title="Kick User">&times;</button>
+                    
+                    <div class="mb-4">
+                        <h3 class="text-xs font-bold text-slate-500 uppercase mb-2">Debaters ({{ sortedDebaters().length }})</h3>
+                        <div class="max-h-48 overflow-y-auto space-y-2">
+                             <div *ngFor="let d of sortedDebaters()" class="flex justify-between text-sm p-2 bg-slate-50 rounded">
+                                 <span [class.line-through]="d.status === 'Eliminated'" [class.text-slate-400]="d.status === 'Eliminated'">
+                                     {{ d.name }} <span class="text-xs font-bold ml-1" [class.text-green-600]="d.status!=='Eliminated'">({{d.wins}}W - {{d.losses}}L)</span>
+                                 </span>
+                                 <div class="flex gap-2">
+                                     <button *ngIf="!tournament.isTournamentClosed()" (click)="toggleStatus(d)" title="Toggle Status">{{ d.status === 'Eliminated' ? '❤️' : '💀' }}</button>
+                                     <button *ngIf="!tournament.isTournamentClosed()" (click)="tournament.kickUser(d.id, 'Debater')" class="text-red-500" title="Kick User">&times;</button>
+                                 </div>
                              </div>
-                         </div>
-                         <div *ngFor="let j of tournament.judges()" class="flex justify-between text-sm p-2 bg-slate-50 rounded">
-                             <span>{{ j.name }} (J)</span>
-                             <button *ngIf="!tournament.isTournamentClosed()" (click)="tournament.kickUser(j.id, 'Judge')" class="text-red-500" title="Kick User">&times;</button>
-                         </div>
+                             <div *ngIf="sortedDebaters().length === 0" class="text-xs text-slate-400 italic p-2">No debaters yet.</div>
+                        </div>
+                    </div>
+
+                    <div>
+                        <h3 class="text-xs font-bold text-slate-500 uppercase mb-2">Judges ({{ sortedJudges().length }})</h3>
+                        <div class="max-h-48 overflow-y-auto space-y-2">
+                             <div *ngFor="let j of sortedJudges()" class="flex justify-between text-sm p-2 bg-slate-50 rounded">
+                                 <span>{{ j.name }}</span>
+                                 <button *ngIf="!tournament.isTournamentClosed()" (click)="tournament.kickUser(j.id, 'Judge')" class="text-red-500" title="Kick User">&times;</button>
+                             </div>
+                             <div *ngIf="sortedJudges().length === 0" class="text-xs text-slate-400 italic p-2">No judges yet.</div>
+                        </div>
                     </div>
                  </div>
              </div>
@@ -227,6 +241,10 @@ export class AdminComponent {
          if (b.wins !== a.wins) return b.wins - a.wins;
          return a.losses - b.losses;
      });
+  });
+
+  sortedJudges = computed(() => {
+    return this.tournament.judges().slice().sort((a, b) => a.name.localeCompare(b.name));
   });
 
   create() { 
