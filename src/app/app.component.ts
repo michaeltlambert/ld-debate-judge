@@ -84,9 +84,10 @@ import { TournamentService } from './tournament.service';
                 <div class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-red-500"></span> <strong>Neg:</strong> {{ debate.negName }}</div>
               </div>
             </div>
+
             <div *ngIf="tournament.getMyAssignments().length === 0" class="text-center py-12 border-2 border-dashed border-slate-200 rounded-xl">
-              <p class="text-slate-400">No debates active.</p>
-              <p class="text-xs text-slate-300 mt-1">Wait for the administrator.</p>
+              <p class="text-slate-400">No debates assigned.</p>
+              <p class="text-xs text-slate-300 mt-1">Please wait for the administrator.</p>
             </div>
           </div>
           

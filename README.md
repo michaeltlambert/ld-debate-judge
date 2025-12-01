@@ -1,21 +1,20 @@
 # DebateMate: Tournament Edition
 
 ## 📘 Project Overview
-DebateMate is a real-time Lincoln-Douglas adjudication system. It allows multiple independent tournaments to run simultaneously using unique **Tournament IDs**.
+DebateMate is a real-time Lincoln-Douglas adjudication system with support for **Preliminary** and **Elimination** rounds.
 
-### **Roles**
-1.  **Tournament Admin:** Creates a tournament, gets a unique **Code**, matches debaters, and finalizes rounds.
-2.  **Judge:** Enters the Tournament Code to join the pool, receives assignments, and submits ballots.
-3.  **Debater:** Enters the Tournament Code, views pairings, and tracks their record.
+### **New Features**
+* **Unlimited Prelims:** Assign Round numbers manually (1, 2, 10, etc.).
+* **Manual Elimination:** Admins can manually eliminate or reinstate debaters from the participant list.
+* **Bracket View:** Visual graph of the elimination stage in the Admin panel.
 
 ### **Tech Stack**
 * **Framework:** Angular v21 (Signals)
-* **Backend:** Firebase Firestore (Filtered Queries)
+* **Backend:** Firebase Firestore
 * **Styling:** Tailwind CSS v4
 
 ## 🚀 Getting Started
 1.  **Install:** `npm install`
 2.  **Run:** `npm start`
 3.  **Workflow:**
-    * **Admin:** Select "Create Tournament" on login. Share the **6-character Code** displayed in the dashboard.
-    * **Participants:** Enter Name, Role, and the **Code** to join.
+    * **Admin:** Manage elimination status manually via the participant list. Create unlimited prelim rounds using the number input.

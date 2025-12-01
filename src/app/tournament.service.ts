@@ -11,10 +11,16 @@ import {
 import { AppConfig } from './config';
 
 // --- DATA MODELS ---
+
+export type RoundType = 'Prelim' | 'Elimination';
+export type RoundStage = string; // Changed to string to support dynamic "Round X"
+
 export interface Debate {
   id: string;
-  tournamentId: string; // Scope
+  tournamentId: string; 
   topic: string;
+  type: RoundType;       
+  stage: RoundStage;     
   affId: string;
   affName: string;
   negId: string;
@@ -25,15 +31,16 @@ export interface Debate {
 
 export interface UserProfile {
   id: string; 
-  tournamentId: string; // Scope
+  tournamentId: string; 
   name: string;
   isOnline: boolean;
   role: 'Admin' | 'Judge' | 'Debater';
+  status?: 'Active' | 'Eliminated'; 
 }
 
 export interface RoundResult {
   id: string;
-  tournamentId: string; // Scope
+  tournamentId: string; 
   debateId: string;
   judgeId: string;
   judgeName: string;
@@ -48,6 +55,7 @@ export interface DebaterStats {
   name: string;
   wins: number;
   losses: number;
+  status: 'Active' | 'Eliminated';
 }
 
 export interface Notification {
@@ -67,7 +75,7 @@ export class TournamentService {
   // Current Scope
   tournamentId = signal<string | null>(null);
   
-  // Collections (Filtered by tournamentId)
+  // Collections
   judges = signal<UserProfile[]>([]);
   debaters = signal<UserProfile[]>([]);
   debates = signal<Debate[]>([]);
@@ -80,13 +88,13 @@ export class TournamentService {
   standings = computed(() => {
     const stats: Record<string, DebaterStats> = {};
     this.debaters().forEach(d => {
-      stats[d.id] = { id: d.id, name: d.name, wins: 0, losses: 0 };
+      stats[d.id] = { id: d.id, name: d.name, wins: 0, losses: 0, status: d.status || 'Active' };
     });
 
     this.debates().forEach(debate => {
       if (debate.status !== 'Closed') return;
-      if (!stats[debate.affId]) stats[debate.affId] = { id: debate.affId, name: debate.affName, wins: 0, losses: 0 };
-      if (!stats[debate.negId]) stats[debate.negId] = { id: debate.negId, name: debate.negName, wins: 0, losses: 0 };
+      if (!stats[debate.affId]) stats[debate.affId] = { id: debate.affId, name: debate.affName, wins: 0, losses: 0, status: 'Active' };
+      if (!stats[debate.negId]) stats[debate.negId] = { id: debate.negId, name: debate.negName, wins: 0, losses: 0, status: 'Active' };
 
       const ballots = this.results().filter(r => r.debateId === debate.id);
       let affVotes = 0;
@@ -155,9 +163,7 @@ export class TournamentService {
 
   private startListeners(tid: string) {
     if (!this.db) return;
-    console.log('[DebateMate] Listening to Tournament:', tid);
     
-    // All queries are filtered by tournamentId
     const qJudges = query(this.getCollection('judges'), where('tournamentId', '==', tid));
     onSnapshot(qJudges, (s) => this.judges.set(s.docs.map(d => ({id:d.id, ...d.data()} as UserProfile))));
 
@@ -176,14 +182,13 @@ export class TournamentService {
     if (!currentUser && this.auth) currentUser = this.auth.currentUser;
     const uid = currentUser?.uid || 'demo-' + Math.random().toString(36).substring(7);
     
-    // Validate Unique Name within this Tournament
     const taken = await this.isNameTaken(name, tid);
     if (taken) throw new Error(`Name "${name}" is already taken in this tournament.`);
 
     this.userRole.set(role);
     this.tournamentId.set(tid);
     
-    const profile: UserProfile = { id: uid, tournamentId: tid, name, role, isOnline: true };
+    const profile: UserProfile = { id: uid, tournamentId: tid, name, role, isOnline: true, status: 'Active' };
 
     localStorage.setItem('debate-user-name', name);
     localStorage.setItem('debate-user-role', role);
@@ -213,7 +218,7 @@ export class TournamentService {
         const collectionName = role === 'Debater' ? 'debaters' : (role === 'Judge' ? 'judges' : null);
         if (collectionName) {
           const ref = doc(this.db, 'artifacts', this.appId, 'public', 'data', collectionName, uid);
-          await setDoc(ref, { id: uid, tournamentId: tid, name, role, isOnline: true }, { merge: true });
+          await setDoc(ref, { id: uid, tournamentId: tid, name, role, isOnline: true, status: 'Active' }, { merge: true });
         }
       } catch (e) {}
     }
@@ -289,14 +294,20 @@ export class TournamentService {
       await deleteDoc(doc(this.db, 'artifacts', this.appId, 'public', 'data', collectionName, userId));
   }
 
-  async createDebate(topic: string, affId: string, affName: string, negId: string, negName: string) {
+  // Manually eliminate/reinstate
+  async toggleDebaterStatus(debaterId: string, currentStatus: string | undefined) {
+    const newStatus = currentStatus === 'Eliminated' ? 'Active' : 'Eliminated';
+    await this.setDebaterStatus(debaterId, newStatus);
+  }
+
+  async createDebate(topic: string, affId: string, affName: string, negId: string, negName: string, type: RoundType, stage: RoundStage) {
     const tid = this.tournamentId() || 'demo';
     const debate = { 
         tournamentId: tid, 
-        topic, affId, affName, negId, negName, judgeIds: [], status: 'Open' as const 
+        topic, affId, affName, negId, negName, judgeIds: [], status: 'Open' as const,
+        type, stage
     };
     if (!this.db) { 
-        // FIX: Add 'id' property and cast to Debate to satisfy TS
         this.debates.update(d => [...d, { id: 'loc-'+Date.now(), ...debate } as Debate]); 
         return; 
     }
@@ -309,9 +320,29 @@ export class TournamentService {
   }
 
   async finalizeRound(debateId: string) {
-    if (!this.db) { this.debates.update(d => d.map(x => x.id === debateId ? {...x, status: 'Closed'} : x)); return; }
+    const winner = this.getWinner(debateId);
+    const debate = this.debates().find(d => d.id === debateId);
+    
+    if (!debate) return;
+
+    if (debate.type === 'Elimination' && winner !== 'Pending') {
+        const loserId = winner === 'Aff' ? debate.negId : debate.affId;
+        await this.setDebaterStatus(loserId, 'Eliminated');
+    }
+
+    if (!this.db) { 
+        this.debates.update(d => d.map(x => x.id === debateId ? {...x, status: 'Closed'} : x)); 
+        return; 
+    }
     const ref = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'debates', debateId);
     await updateDoc(ref, { status: 'Closed' });
+  }
+
+  public async setDebaterStatus(debaterId: string, status: 'Active' | 'Eliminated') {
+    if (this.db) {
+        const ref = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'debaters', debaterId);
+        await updateDoc(ref, { status });
+    }
   }
 
   async assignJudge(debateId: string, judgeId: string) {
@@ -355,7 +386,6 @@ export class TournamentService {
     return collection(this.db, 'artifacts', this.appId, 'public', 'data', name);
   }
 
-  // --- HELPERS ---
   getMyAssignments() {
     const uid = this.userProfile()?.id;
     if (!uid) return [];
