@@ -219,6 +219,7 @@ export interface Debate {
   negName: string;
   judgeIds: string[]; 
   status: 'Open' | 'Closed';
+  createdAt: number; // Added for sorting
 }
 
 export interface UserProfile {
@@ -292,7 +293,6 @@ export class TournamentService {
   
   activeDebateId = signal<string | null>(null);
   
-  // Current active flow state
   currentFlow = signal<DebateArgument[]>([]);
   currentFrameworks = signal<Record<string, FrameworkData>>({});
 
@@ -564,7 +564,7 @@ export class TournamentService {
 
   private startListeners(tid: string) {
     if (!this.db) return;
-    this.stopListeners(); // Clean up old tournament listeners
+    this.stopListeners(); 
     
     const qJudges = query(this.getCollection('judges'), where('tournamentId', '==', tid));
     this.collectionUnsubscribes.push(onSnapshot(qJudges, (s) => this.judges.set(s.docs.map(d => ({id:d.id, ...d.data()} as UserProfile)))));
@@ -669,7 +669,7 @@ export class TournamentService {
     if (this.isTournamentClosed()) return;
     const tid = this.tournamentId();
     if (!tid) throw new Error("No tournament context found.");
-    const debate = { tournamentId: tid, topic, affId, affName, negId, negName, judgeIds: [], status: 'Open' as const, type, stage };
+    const debate = { tournamentId: tid, topic, affId, affName, negId, negName, judgeIds: [], status: 'Open' as const, type, stage, createdAt: Date.now() };
     if (!this.db) { this.debates.update(d => [...d, { id: 'loc-'+Date.now(), ...debate } as Debate]); return; }
     await addDoc(this.getCollection('debates'), debate);
   }
@@ -1257,11 +1257,11 @@ import { TournamentService, Debate, RoundType, RoundStage, UserProfile, RoundRes
                       </div>
                       <div class="space-y-2">
                         <label class="block text-xs font-bold text-blue-600 uppercase mb-1">Affirmative</label>
-                        <select [(ngModel)]="selectedAffId" class="w-full p-2 border rounded text-sm bg-white"><option value="" disabled selected>Select Debater...</option><option *ngFor="let d of tournament.debaters()" [value]="d.id" [disabled]="d.status === 'Eliminated'" [class.text-red-400]="d.status === 'Eliminated'">{{ d.name }} {{ d.status === 'Eliminated' ? '(Eliminated)' : '' }}</option></select>
+                        <select [(ngModel)]="selectedAffId" class="w-full p-2 border rounded text-sm bg-white"><option value="" disabled selected>Select Debater...</option><option *ngFor="let d of sortedDebaters()" [value]="d.id" [disabled]="d.status === 'Eliminated'" [class.text-red-400]="d.status === 'Eliminated'">{{ d.name }} {{ d.status === 'Eliminated' ? '(Eliminated)' : '' }}</option></select>
                       </div>
                       <div class="space-y-2">
                         <label class="block text-xs font-bold text-red-600 uppercase mb-1">Negative</label>
-                        <select [(ngModel)]="selectedNegId" class="w-full p-2 border rounded text-sm bg-white"><option value="" disabled selected>Select Debater...</option><option *ngFor="let d of tournament.debaters()" [value]="d.id" [disabled]="d.status === 'Eliminated'" [class.text-red-400]="d.status === 'Eliminated'">{{ d.name }} {{ d.status === 'Eliminated' ? '(Eliminated)' : '' }}</option></select>
+                        <select [(ngModel)]="selectedNegId" class="w-full p-2 border rounded text-sm bg-white"><option value="" disabled selected>Select Debater...</option><option *ngFor="let d of sortedDebaters()" [value]="d.id" [disabled]="d.status === 'Eliminated'" [class.text-red-400]="d.status === 'Eliminated'">{{ d.name }} {{ d.status === 'Eliminated' ? '(Eliminated)' : '' }}</option></select>
                       </div>
                       <button (click)="create()" class="w-full bg-slate-900 text-white font-bold py-3 rounded-lg hover:bg-slate-800" title="Create Matchup">Create Matchup</button>
                     </div>
@@ -1270,8 +1270,8 @@ import { TournamentService, Debate, RoundType, RoundStage, UserProfile, RoundRes
                  <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                     <h2 class="font-bold text-slate-800 mb-4">Participants</h2>
                     <div class="max-h-64 overflow-y-auto space-y-2">
-                         <div *ngFor="let d of tournament.debaters()" class="flex justify-between text-sm p-2 bg-slate-50 rounded">
-                             <span [class.line-through]="d.status === 'Eliminated'" [class.text-slate-400]="d.status === 'Eliminated'">{{ d.name }}</span>
+                         <div *ngFor="let d of sortedDebaters()" class="flex justify-between text-sm p-2 bg-slate-50 rounded">
+                             <span [class.line-through]="d.status === 'Eliminated'" [class.text-slate-400]="d.status === 'Eliminated'">{{ d.name }} <span class="text-xs font-bold ml-1" [class.text-green-600]="d.status!=='Eliminated'">({{d.wins}}W - {{d.losses}}L)</span></span>
                              <div class="flex gap-2">
                                  <button *ngIf="!tournament.isTournamentClosed()" (click)="toggleStatus(d)" title="Toggle Status">{{ d.status === 'Eliminated' ? '❤️' : '💀' }}</button>
                                  <button *ngIf="!tournament.isTournamentClosed()" (click)="tournament.kickUser(d.id, 'Debater')" class="text-red-500" title="Kick User">&times;</button>
@@ -1286,7 +1286,7 @@ import { TournamentService, Debate, RoundType, RoundStage, UserProfile, RoundRes
              </div>
              
              <div class="lg:col-span-8 space-y-6">
-                <div *ngFor="let debate of tournament.debates()" class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 mb-4">
+                <div *ngFor="let debate of sortedDebates()" class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 mb-4">
                      <div class="flex justify-between items-start mb-4 border-b border-slate-100 pb-3">
                         <div>
                             <div class="flex items-center gap-3">
@@ -1370,6 +1370,21 @@ export class AdminComponent {
   activeTab = signal<'Dashboard' | 'Bracket'>('Dashboard');
   bracketStages = ['Octofinals', 'Quarterfinals', 'Semifinals', 'Finals'];
 
+  sortedDebates = computed(() => 
+     this.tournament.debates().slice().sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+  );
+
+  sortedDebaters = computed(() => {
+     const stats = this.tournament.standings();
+     return this.tournament.debaters().map(d => {
+         const s = stats.find(stat => stat.id === d.id);
+         return { ...d, wins: s?.wins || 0, losses: s?.losses || 0 };
+     }).sort((a, b) => {
+         if (b.wins !== a.wins) return b.wins - a.wins;
+         return a.losses - b.losses;
+     });
+  });
+
   create() { 
     const aff = this.tournament.debaters().find(d => d.id === this.selectedAffId);
     const neg = this.tournament.debaters().find(d => d.id === this.selectedNegId);
@@ -1386,7 +1401,7 @@ export class AdminComponent {
   closeTournament() { if(confirm('Close this tournament?')) this.tournament.closeTournament(this.tournament.tournamentId()!); }
   assign(debateId: string, judgeId: string) { this.tournament.assignJudge(debateId, judgeId); }
   remove(debateId: string, judgeId: string) { this.tournament.removeJudge(debateId, judgeId); }
-  toggleStatus(debater: UserProfile) { this.tournament.toggleDebaterStatus(debater.id, debater.status); }
+  toggleStatus(debater: any) { this.tournament.toggleDebaterStatus(debater.id, debater.status); }
   getDebatesForStage(stage: string) { return this.tournament.debates().filter(d => d.type === 'Elimination' && d.stage === stage); }
   getWinner(debateId: string) { return this.tournament.getWinner(debateId); }
   getWinnerName(debate: Debate) {
@@ -1544,7 +1559,7 @@ export class BallotComponent {
   },
   {
     path: 'src/app/flow.component.ts',
-    content: `import { Component, signal, effect, inject } from '@angular/core';
+    content: `import { Component, signal, effect, inject, Input } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { TermComponent } from './term.component';
@@ -1561,13 +1576,16 @@ interface FrameworkData { value: string; criterion: string; }
   standalone: true,
   imports: [CommonModule, FormsModule, TermComponent],
   template: \`
-    <div id="debate-flow" class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 h-full flex flex-col">
+    <div id="debate-flow" class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 h-full flex flex-col relative">
+      <!-- Read-Only Overlay -->
+      <div *ngIf="readOnly()" class="absolute top-2 right-4 bg-amber-100 text-amber-800 text-xs font-bold px-2 py-1 rounded border border-amber-200 z-10">Read Only View</div>
+      
       <div class="mb-4 flex items-center justify-between">
         <div>
           <h2 class="font-bold text-slate-700">Interactive Flow Sheet</h2>
           <p class="text-xs text-slate-500">Star <span class="text-purple-600 font-bold">★ Voting Issues</span> to track winning arguments.</p>
         </div>
-        <button (click)="resetFlow()" class="text-xs text-red-400 hover:text-red-600 underline" aria-label="Clear All Notes">Clear All</button>
+        <button *ngIf="!readOnly()" (click)="resetFlow()" class="text-xs text-red-400 hover:text-red-600 underline" aria-label="Clear All Notes">Clear All</button>
       </div>
       <div class="flex-1 overflow-x-auto pb-12" (click)="closeMenus()"> 
         <div class="flex h-full min-w-max divide-x divide-slate-200 border border-slate-200 rounded-lg bg-slate-50">
@@ -1578,18 +1596,20 @@ interface FrameworkData { value: string; criterion: string; }
                 <div class="text-[10px] font-bold text-indigo-400 uppercase tracking-widest mb-2 text-center">Framework</div>
                 <div class="flex items-center gap-2 mb-2">
                   <span class="text-xs font-bold text-indigo-700 w-16 text-right"><app-term lookup="Value Premise">Value</app-term>:</span>
-                  <input type="text" [(ngModel)]="frameworks()[col.id].value" (ngModelChange)="saveData()" placeholder="e.g. Justice" class="flex-1 text-sm font-bold text-indigo-900 bg-white border border-indigo-100 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500" aria-label="Value Premise">
+                  <input type="text" [(ngModel)]="frameworks()[col.id].value" (ngModelChange)="saveData()" [disabled]="readOnly()" placeholder="e.g. Justice" class="flex-1 text-sm font-bold text-indigo-900 bg-white border border-indigo-100 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500" aria-label="Value Premise">
                 </div>
                 <div class="flex items-center gap-2">
                   <span class="text-xs font-bold text-indigo-700 w-16 text-right"><app-term lookup="Value Criterion">Criterion</app-term>:</span>
-                  <input type="text" [(ngModel)]="frameworks()[col.id].criterion" (ngModelChange)="saveData()" placeholder="e.g. Social Welfare" class="flex-1 text-sm font-medium text-indigo-800 bg-white border border-indigo-100 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500" aria-label="Value Criterion">
+                  <input type="text" [(ngModel)]="frameworks()[col.id].criterion" (ngModelChange)="saveData()" [disabled]="readOnly()" placeholder="e.g. Social Welfare" class="flex-1 text-sm font-medium text-indigo-800 bg-white border border-indigo-100 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500" aria-label="Value Criterion">
                 </div>
               </div>
               <div *ngFor="let arg of getArgsForCol(i)" class="relative p-3 rounded-lg border shadow-sm transition-all group/card" [ngClass]="{'bg-purple-50 border-purple-300 ring-1 ring-purple-200 shadow-md': arg.isVoter, 'bg-green-50 border-green-200 opacity-70': !arg.isVoter && arg.status === 'addressed', 'bg-red-50 border-red-200': !arg.isVoter && arg.status === 'dropped', 'bg-white border-slate-200': !arg.isVoter && arg.status === 'open'}">
                 <div *ngIf="isLinkedToPrevious(arg)" class="absolute -left-3 top-4 w-3 h-[2px] bg-slate-300"></div>
-                <div *ngIf="editingId() !== arg.id" (click)="editArg(arg.id, $event)" class="text-sm text-slate-800 whitespace-pre-wrap cursor-text min-h-[1.5rem]">{{ arg.text }}</div>
-                <textarea *ngIf="editingId() === arg.id" [(ngModel)]="arg.text" (blur)="stopEditing()" (click)="$event.stopPropagation()" (keydown.enter)="$event.preventDefault(); stopEditing()" class="w-full text-sm p-1 border rounded focus:ring-2 focus:ring-blue-500 bg-white" autoFocus></textarea>
-                <div class="mt-2 flex justify-between items-center opacity-0 group-hover/card:opacity-100 transition-opacity">
+                <div *ngIf="editingId() !== arg.id" (click)="!readOnly() && editArg(arg.id, $event)" class="text-sm text-slate-800 whitespace-pre-wrap cursor-text min-h-[1.5rem]">{{ arg.text }}</div>
+                <textarea *ngIf="editingId() === arg.id && !readOnly()" [(ngModel)]="arg.text" (blur)="stopEditing()" (click)="$event.stopPropagation()" (keydown.enter)="$event.preventDefault(); stopEditing()" class="w-full text-sm p-1 border rounded focus:ring-2 focus:ring-blue-500 bg-white" autoFocus></textarea>
+                
+                <!-- Controls (Only visible if NOT read-only) -->
+                <div *ngIf="!readOnly()" class="mt-2 flex justify-between items-center opacity-0 group-hover/card:opacity-100 transition-opacity">
                   <div class="flex gap-1 items-center">
                     <button (click)="setDrop(arg); $event.stopPropagation()" title="Drop" class="p-1 hover:text-red-600 text-slate-400"><span class="font-bold text-xs">✕</span></button>
                     <button (click)="setAddressed(arg); $event.stopPropagation()" title="Address" class="p-1 hover:text-green-600 text-slate-400"><span class="font-bold text-xs">✓</span></button>
@@ -1605,13 +1625,15 @@ interface FrameworkData { value: string; criterion: string; }
                     </div>
                   </div>
                 </div>
+                
+                <!-- Status Indicators -->
                 <div *ngIf="arg.status === 'dropped' && !arg.isVoter" class="absolute -top-2 -right-2 bg-red-500 text-white text-[10px] px-2 py-0.5 rounded-full font-bold shadow-sm z-10">DROP</div>
                 <div *ngIf="arg.isVoter" class="absolute -top-2 -right-2 bg-purple-600 text-white text-[10px] px-2 py-0.5 rounded-full font-bold shadow-sm z-10 flex items-center gap-1"><span>★</span> VOTER</div>
                 <div class="mt-1 pt-1 border-t border-slate-100/50">
-                   <input [(ngModel)]="arg.comments" (ngModelChange)="persistArgs()" placeholder="Add note..." class="w-full text-[10px] p-0.5 bg-transparent border-none focus:ring-0 placeholder:text-slate-300 text-slate-500 italic">
+                   <input [(ngModel)]="arg.comments" (ngModelChange)="persistArgs()" [disabled]="readOnly()" placeholder="Add note..." class="w-full text-[10px] p-0.5 bg-transparent border-none focus:ring-0 placeholder:text-slate-300 text-slate-500 italic">
                 </div>
               </div>
-              <div class="mt-2"><input type="text" [placeholder]="col.isCx ? '+ Note Admission...' : '+ New Point...'" (keydown.enter)="addArg($event, i)" class="w-full text-xs p-2 bg-transparent border border-dashed border-slate-300 rounded hover:bg-white focus:ring-2 focus:ring-blue-500 transition-all" aria-label="Add new argument"></div>
+              <div *ngIf="!readOnly()" class="mt-2"><input type="text" [placeholder]="col.isCx ? '+ Note Admission...' : '+ New Point...'" (keydown.enter)="addArg($event, i)" class="w-full text-xs p-2 bg-transparent border border-dashed border-slate-300 rounded hover:bg-white focus:ring-2 focus:ring-blue-500 transition-all" aria-label="Add new argument"></div>
             </div>
           </div>
         </div>
@@ -1634,17 +1656,38 @@ export class FlowComponent {
   frameworks = signal<Record<string, FrameworkData>>({ '1AC': { value: '', criterion: '' }, '1NC': { value: '', criterion: '' } });
   editingId = signal<string | null>(null);
   activeLinkId = signal<string | null>(null);
+  readOnly = signal(false);
+
+  // Input to set flow data for read-only mode
+  @Input() set viewOnlyFlow(data: { args: DebateArgument[], frameworks: Record<string, FrameworkData> } | undefined) {
+      if (data) {
+          this.arguments.set(data.args || []);
+          this.frameworks.set(data.frameworks || { '1AC': { value: '', criterion: '' }, '1NC': { value: '', criterion: '' } });
+          this.readOnly.set(true);
+      } else {
+          this.readOnly.set(false);
+      }
+  }
 
   constructor() {
     this.loadData();
+    
+    // Save to local storage only if editing
     effect(() => {
-      localStorage.setItem('ld-flow-args', JSON.stringify(this.arguments()));
-      localStorage.setItem('ld-flow-frameworks', JSON.stringify(this.frameworks()));
+      if (!this.readOnly()) {
+          localStorage.setItem('ld-flow-args', JSON.stringify(this.arguments()));
+          localStorage.setItem('ld-flow-frameworks', JSON.stringify(this.frameworks()));
+          
+          // Sync to service for submission
+          this.tournament.currentFlow.set(this.arguments());
+          this.tournament.currentFrameworks.set(this.frameworks());
+      }
     });
+    
     effect(() => {
       const activeId = this.tournament.activeDebateId();
       const lastDebateId = localStorage.getItem('ld-current-debate-id');
-      if (activeId !== lastDebateId) {
+      if (activeId !== lastDebateId && !this.readOnly()) {
         this.internalReset();
         if (activeId) localStorage.setItem('ld-current-debate-id', activeId);
         else localStorage.removeItem('ld-current-debate-id');
@@ -1669,10 +1712,18 @@ export class FlowComponent {
     } catch(e) { this.arguments.set([]); }
   }
 
-  saveData() { localStorage.setItem('ld-flow-frameworks', JSON.stringify(this.frameworks())); }
-  persistArgs() { this.arguments.update(a => [...a]); }
-  toggleVoter(arg: DebateArgument) { this.arguments.update(args => args.map(a => a.id === arg.id ? { ...a, isVoter: !a.isVoter } : a)); }
+  saveData() { 
+      if(!this.readOnly()) {
+          localStorage.setItem('ld-flow-frameworks', JSON.stringify(this.frameworks())); 
+          this.tournament.currentFrameworks.set(this.frameworks());
+      }
+  }
+  persistArgs() { if(!this.readOnly()) this.arguments.update(a => [...a]); }
+  
+  toggleVoter(arg: DebateArgument) { if(!this.readOnly()) this.arguments.update(args => args.map(a => a.id === arg.id ? { ...a, isVoter: !a.isVoter } : a)); }
+  
   createLink(originalArg: DebateArgument, targetIdx: number) { 
+    if(this.readOnly()) return;
     this.updateArgStatus(originalArg.id, 'addressed');
     const isSkip = targetIdx > originalArg.colIdx + 1;
     const sourceName = this.columns[originalArg.colIdx].id; 
@@ -1682,24 +1733,212 @@ export class FlowComponent {
     this.arguments.update(args => [...args, { id: crypto.randomUUID(), text: \`\${prefix} "\${originalArg.text.substring(0, 15)}..."\`, colIdx: targetIdx, status: 'open', parentId: originalArg.id, isVoter: false, comments: '' }]);
     this.activeLinkId.set(null);
   }
+  
   addArg(event: any, colIdx: number) { 
+    if(this.readOnly()) return;
     const text = event.target.value.trim();
     if (!text) return;
     this.arguments.update(args => [...args, { id: crypto.randomUUID(), text, colIdx, status: 'open', parentId: null, isVoter: false, comments: '' }]);
     event.target.value = '';
   }
+  
   getArgsForCol(idx: number) { return this.arguments().filter(a => a.colIdx === idx); }
   getFutureColumns(currentIdx: number) { return this.columns.map((col, idx) => ({ name: col.id, isCx: col.isCx, idx })).filter(c => c.idx > currentIdx); }
   isLinkedToPrevious(arg: DebateArgument): boolean { if (!arg.parentId) return false; const parent = this.arguments().find(a => a.id === arg.parentId); return parent ? (arg.colIdx === parent.colIdx + 1) : false; }
   toggleLinkMenu(id: string, e: Event) { e.stopPropagation(); this.activeLinkId.set(this.activeLinkId() === id ? null : id); }
   closeMenus() { this.activeLinkId.set(null); }
-  deleteArg(arg: DebateArgument) { if (confirm('Delete note?')) this.arguments.update(args => args.filter(a => a.id !== arg.id)); }
-  setDrop(arg: DebateArgument) { this.updateArgStatus(arg.id, 'dropped'); }
-  setAddressed(arg: DebateArgument) { this.updateArgStatus(arg.id, 'addressed'); }
+  deleteArg(arg: DebateArgument) { if (!this.readOnly() && confirm('Delete note?')) this.arguments.update(args => args.filter(a => a.id !== arg.id)); }
+  setDrop(arg: DebateArgument) { if(!this.readOnly()) this.updateArgStatus(arg.id, 'dropped'); }
+  setAddressed(arg: DebateArgument) { if(!this.readOnly()) this.updateArgStatus(arg.id, 'addressed'); }
   updateArgStatus(id: string, status: any) { this.arguments.update(args => args.map(a => a.id === id ? { ...a, status } : a)); }
-  editArg(id: string, e: Event) { e.stopPropagation(); this.editingId.set(id); }
+  editArg(id: string, e: Event) { if(!this.readOnly()) { e.stopPropagation(); this.editingId.set(id); } }
   stopEditing() { this.editingId.set(null); }
-  resetFlow() { if(confirm('Clear all notes?')) this.internalReset(); }
+  resetFlow() { if(!this.readOnly() && confirm('Clear all notes?')) this.internalReset(); }
+}`
+  },
+  {
+    path: 'src/app/profile.component.ts',
+    content: `import { Component, inject, signal, computed } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
+import { TournamentService, UserProfile, RoundResult } from './tournament.service';
+import { FlowComponent } from './flow.component';
+
+@Component({
+  selector: 'app-profile',
+  standalone: true,
+  imports: [CommonModule, FormsModule, FlowComponent],
+  template: \`
+    <div class="p-6 max-w-6xl mx-auto">
+      <h1 class="text-2xl font-bold text-slate-800 mb-6">My Profile</h1>
+      
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        
+        <!-- Left: Identity & Contact -->
+        <div class="lg:col-span-4 space-y-6">
+            <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200 text-center h-fit">
+               <img [src]="profile()?.photoURL || 'https://ui-avatars.com/api/?name=' + profile()?.name" class="w-24 h-24 rounded-full mx-auto mb-4 border-4 border-slate-100 shadow-inner">
+               <h2 class="text-xl font-bold text-slate-800">{{ profile()?.name }}</h2>
+               <p class="text-sm text-slate-500 mb-4">{{ profile()?.email }}</p>
+               <span class="bg-slate-100 text-slate-600 px-3 py-1 rounded-full text-xs font-bold uppercase">{{ profile()?.role }}</span>
+               
+               <div class="mt-6 border-t border-slate-100 pt-4 text-left space-y-3">
+                 <h3 class="text-xs font-bold text-slate-400 uppercase">Contact Info</h3>
+                 <div>
+                    <label class="text-[10px] text-slate-400 font-bold block">Phone</label>
+                    <input [(ngModel)]="editPhone" class="w-full text-sm border-b border-slate-200 focus:border-blue-500 outline-none py-1" placeholder="Add phone number">
+                 </div>
+                 <div>
+                    <label class="text-[10px] text-slate-400 font-bold block">Address</label>
+                    <input [(ngModel)]="editAddress" class="w-full text-sm border-b border-slate-200 focus:border-blue-500 outline-none py-1" placeholder="Add address">
+                 </div>
+                 <button (click)="saveContact()" class="w-full bg-blue-600 text-white text-xs font-bold py-2 rounded mt-2 hover:bg-blue-700">Save Changes</button>
+               </div>
+            </div>
+
+            <!-- Join/Switch Tournament -->
+            <div class="bg-blue-50 p-6 rounded-xl border border-blue-200">
+               <h3 class="text-lg font-bold text-blue-800 mb-2">Join / Switch Tournament</h3>
+               <p class="text-sm text-blue-600 mb-4">Enter a 6-digit code to join a new tournament.</p>
+               <div class="flex gap-2">
+                  <input [(ngModel)]="joinCode" class="flex-1 p-2 border border-blue-300 rounded font-mono uppercase" placeholder="CODE">
+                  <button (click)="join()" class="bg-blue-600 text-white px-4 py-2 rounded font-bold hover:bg-blue-700">Join</button>
+               </div>
+               <p *ngIf="joinError" class="text-xs text-red-500 mt-2 font-bold">{{ joinError }}</p>
+           </div>
+        </div>
+
+        <!-- Right: History & Stats -->
+        <div class="lg:col-span-8 space-y-6">
+           <!-- Stats -->
+           <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+              <h3 class="text-lg font-bold text-slate-700 mb-4">Performance Stats</h3>
+              <div class="grid grid-cols-3 gap-4 text-center">
+                 <div class="p-4 bg-slate-50 rounded-lg">
+                    <div class="text-3xl font-bold text-slate-800">{{ myStats().wins }}</div>
+                    <div class="text-xs font-bold text-slate-500 uppercase">Wins</div>
+                 </div>
+                 <div class="p-4 bg-slate-50 rounded-lg">
+                    <div class="text-3xl font-bold text-slate-800">{{ myStats().losses }}</div>
+                    <div class="text-xs font-bold text-slate-500 uppercase">Losses</div>
+                 </div>
+                 <div class="p-4 bg-slate-50 rounded-lg">
+                    <div class="text-3xl font-bold text-slate-800">{{ getHistory().length }}</div>
+                    <div class="text-xs font-bold text-slate-500 uppercase">Rounds</div>
+                 </div>
+              </div>
+           </div>
+
+           <!-- Tournament History List -->
+           <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+              <div class="flex justify-between items-center mb-4">
+                 <h3 class="text-lg font-bold text-slate-700">Match History</h3>
+                 <div class="flex gap-2 text-xs">
+                    <span class="px-2 py-1 rounded bg-slate-100 text-slate-500">Filter by Tournament:</span>
+                    <button *ngFor="let tid of uniqueTournaments()" (click)="selectedTournamentId.set(tid)" 
+                         [class]="selectedTournamentId() === tid ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'"
+                         class="px-2 py-1 rounded font-bold transition-colors">
+                         {{ tid }}
+                    </button>
+                    <button *ngIf="selectedTournamentId()" (click)="selectedTournamentId.set(null)" class="text-red-500 hover:underline ml-1">Clear</button>
+                 </div>
+              </div>
+
+              <div class="space-y-3">
+                 <div *ngFor="let item of filteredHistory()" (click)="viewingFlow.set(item)" class="border-b border-slate-100 pb-3 last:border-0 cursor-pointer hover:bg-slate-50 p-2 rounded transition-colors group">
+                    <div class="flex justify-between text-sm mb-1">
+                        <div>
+                           <span class="font-bold text-slate-700">Round ID: {{ item.debateId.substring(0,6) }}</span>
+                           <span class="ml-2 text-[10px] bg-slate-100 px-1.5 py-0.5 rounded text-slate-500 font-mono">{{ item.tournamentId }}</span>
+                        </div>
+                        <span class="text-xs text-slate-400">{{ item.timestamp | date:'short' }}</span>
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <div class="text-xs text-slate-500 italic truncate max-w-md">"{{ item.rfd }}"</div>
+                        <div class="text-[10px] text-blue-500 group-hover:underline">View Flow &rarr;</div>
+                    </div>
+                    <div class="mt-1">
+                       <span class="text-[10px] font-bold px-2 py-0.5 rounded" 
+                             [class.bg-green-100]="item.decision === 'Aff' ? 'text-green-700' : 'text-red-700'">
+                             Vote: {{ item.decision }} ({{item.affScore}}-{{item.negScore}})
+                       </span>
+                    </div>
+                 </div>
+                 <div *ngIf="filteredHistory().length === 0" class="text-center text-slate-400 text-sm py-4">No history found.</div>
+              </div>
+           </div>
+        </div>
+      </div>
+
+      <!-- HISTORY MODAL -->
+      <div *ngIf="viewingFlow()" class="fixed inset-0 bg-black/80 z-50 flex flex-col p-4 animate-in fade-in">
+          <div class="bg-white rounded-t-xl p-4 flex justify-between items-center shrink-0">
+             <div>
+                 <h2 class="font-bold text-lg">Historical Record</h2>
+                 <p class="text-xs text-slate-500">Judge: {{ viewingFlow()?.judgeName }} | Decision: {{ viewingFlow()?.decision }}</p>
+             </div>
+             <button (click)="viewingFlow.set(null)" class="bg-slate-100 hover:bg-slate-200 px-4 py-2 rounded-lg font-bold text-sm">Close</button>
+          </div>
+          <div class="bg-slate-100 flex-1 overflow-hidden rounded-b-xl relative">
+              <app-flow [viewOnlyFlow]="{ args: viewingFlow()?.flow || [], frameworks: viewingFlow()?.frameworks || {} }" class="h-full block" />
+          </div>
+      </div>
+    </div>
+  \`
+})
+export class ProfileComponent {
+  tournament = inject(TournamentService);
+  profile = this.tournament.userProfile;
+  
+  editPhone = this.profile()?.phone || '';
+  editAddress = this.profile()?.address || '';
+  
+  joinCode = '';
+  joinError = '';
+  
+  selectedTournamentId = signal<string | null>(null);
+  viewingFlow = signal<RoundResult | null>(null);
+
+  myStats() { return this.tournament.getMyDebaterRecord(); }
+
+  // Raw history
+  getHistory() {
+     const uid = this.profile()?.id;
+     if (!uid) return [];
+     if (this.profile()?.role === 'Judge') {
+         return this.tournament.results().filter(r => r.judgeId === uid);
+     } else {
+         const myDebates = this.tournament.debates().filter(d => d.affId === uid || d.negId === uid).map(d => d.id);
+         return this.tournament.results().filter(r => myDebates.includes(r.debateId));
+     }
+  }
+  
+  // Filtered History
+  filteredHistory = computed(() => {
+      const hist = this.getHistory();
+      const filter = this.selectedTournamentId();
+      if (filter) return hist.filter(h => h.tournamentId === filter);
+      return hist;
+  });
+
+  uniqueTournaments = computed(() => [...new Set(this.getHistory().map(h => h.tournamentId))]);
+
+  async join() {
+      if (!this.joinCode) return;
+      this.joinError = '';
+      try {
+          await this.tournament.joinTournament(this.joinCode.toUpperCase());
+          alert("Successfully joined tournament!");
+          this.joinCode = '';
+      } catch (e: any) {
+          this.joinError = e.message;
+      }
+  }
+
+  saveContact() {
+      this.tournament.updatePersonalInfo({ phone: this.editPhone, address: this.editAddress });
+      alert('Profile updated!');
+  }
 }`
   }
 ];

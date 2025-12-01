@@ -101,11 +101,11 @@ import { TournamentService, Debate, RoundType, RoundStage, UserProfile, RoundRes
                       </div>
                       <div class="space-y-2">
                         <label class="block text-xs font-bold text-blue-600 uppercase mb-1">Affirmative</label>
-                        <select [(ngModel)]="selectedAffId" class="w-full p-2 border rounded text-sm bg-white"><option value="" disabled selected>Select Debater...</option><option *ngFor="let d of tournament.debaters()" [value]="d.id" [disabled]="d.status === 'Eliminated'" [class.text-red-400]="d.status === 'Eliminated'">{{ d.name }} {{ d.status === 'Eliminated' ? '(Eliminated)' : '' }}</option></select>
+                        <select [(ngModel)]="selectedAffId" class="w-full p-2 border rounded text-sm bg-white"><option value="" disabled selected>Select Debater...</option><option *ngFor="let d of sortedDebaters()" [value]="d.id" [disabled]="d.status === 'Eliminated'" [class.text-red-400]="d.status === 'Eliminated'">{{ d.name }} {{ d.status === 'Eliminated' ? '(Eliminated)' : '' }}</option></select>
                       </div>
                       <div class="space-y-2">
                         <label class="block text-xs font-bold text-red-600 uppercase mb-1">Negative</label>
-                        <select [(ngModel)]="selectedNegId" class="w-full p-2 border rounded text-sm bg-white"><option value="" disabled selected>Select Debater...</option><option *ngFor="let d of tournament.debaters()" [value]="d.id" [disabled]="d.status === 'Eliminated'" [class.text-red-400]="d.status === 'Eliminated'">{{ d.name }} {{ d.status === 'Eliminated' ? '(Eliminated)' : '' }}</option></select>
+                        <select [(ngModel)]="selectedNegId" class="w-full p-2 border rounded text-sm bg-white"><option value="" disabled selected>Select Debater...</option><option *ngFor="let d of sortedDebaters()" [value]="d.id" [disabled]="d.status === 'Eliminated'" [class.text-red-400]="d.status === 'Eliminated'">{{ d.name }} {{ d.status === 'Eliminated' ? '(Eliminated)' : '' }}</option></select>
                       </div>
                       <button (click)="create()" class="w-full bg-slate-900 text-white font-bold py-3 rounded-lg hover:bg-slate-800" title="Create Matchup">Create Matchup</button>
                     </div>
@@ -114,8 +114,8 @@ import { TournamentService, Debate, RoundType, RoundStage, UserProfile, RoundRes
                  <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                     <h2 class="font-bold text-slate-800 mb-4">Participants</h2>
                     <div class="max-h-64 overflow-y-auto space-y-2">
-                         <div *ngFor="let d of tournament.debaters()" class="flex justify-between text-sm p-2 bg-slate-50 rounded">
-                             <span [class.line-through]="d.status === 'Eliminated'" [class.text-slate-400]="d.status === 'Eliminated'">{{ d.name }}</span>
+                         <div *ngFor="let d of sortedDebaters()" class="flex justify-between text-sm p-2 bg-slate-50 rounded">
+                             <span [class.line-through]="d.status === 'Eliminated'" [class.text-slate-400]="d.status === 'Eliminated'">{{ d.name }} <span class="text-xs font-bold ml-1" [class.text-green-600]="d.status!=='Eliminated'">({{d.wins}}W - {{d.losses}}L)</span></span>
                              <div class="flex gap-2">
                                  <button *ngIf="!tournament.isTournamentClosed()" (click)="toggleStatus(d)" title="Toggle Status">{{ d.status === 'Eliminated' ? '❤️' : '💀' }}</button>
                                  <button *ngIf="!tournament.isTournamentClosed()" (click)="tournament.kickUser(d.id, 'Debater')" class="text-red-500" title="Kick User">&times;</button>
@@ -130,7 +130,7 @@ import { TournamentService, Debate, RoundType, RoundStage, UserProfile, RoundRes
              </div>
              
              <div class="lg:col-span-8 space-y-6">
-                <div *ngFor="let debate of tournament.debates()" class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 mb-4">
+                <div *ngFor="let debate of sortedDebates()" class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 mb-4">
                      <div class="flex justify-between items-start mb-4 border-b border-slate-100 pb-3">
                         <div>
                             <div class="flex items-center gap-3">
@@ -214,6 +214,21 @@ export class AdminComponent {
   activeTab = signal<'Dashboard' | 'Bracket'>('Dashboard');
   bracketStages = ['Octofinals', 'Quarterfinals', 'Semifinals', 'Finals'];
 
+  sortedDebates = computed(() => 
+     this.tournament.debates().slice().sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+  );
+
+  sortedDebaters = computed(() => {
+     const stats = this.tournament.standings();
+     return this.tournament.debaters().map(d => {
+         const s = stats.find(stat => stat.id === d.id);
+         return { ...d, wins: s?.wins || 0, losses: s?.losses || 0 };
+     }).sort((a, b) => {
+         if (b.wins !== a.wins) return b.wins - a.wins;
+         return a.losses - b.losses;
+     });
+  });
+
   create() { 
     const aff = this.tournament.debaters().find(d => d.id === this.selectedAffId);
     const neg = this.tournament.debaters().find(d => d.id === this.selectedNegId);
@@ -230,7 +245,7 @@ export class AdminComponent {
   closeTournament() { if(confirm('Close this tournament?')) this.tournament.closeTournament(this.tournament.tournamentId()!); }
   assign(debateId: string, judgeId: string) { this.tournament.assignJudge(debateId, judgeId); }
   remove(debateId: string, judgeId: string) { this.tournament.removeJudge(debateId, judgeId); }
-  toggleStatus(debater: UserProfile) { this.tournament.toggleDebaterStatus(debater.id, debater.status); }
+  toggleStatus(debater: any) { this.tournament.toggleDebaterStatus(debater.id, debater.status); }
   getDebatesForStage(stage: string) { return this.tournament.debates().filter(d => d.type === 'Elimination' && d.stage === stage); }
   getWinner(debateId: string) { return this.tournament.getWinner(debateId); }
   getWinnerName(debate: Debate) {

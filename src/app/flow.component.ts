@@ -1,4 +1,4 @@
-import { Component, signal, effect, inject } from '@angular/core';
+import { Component, signal, effect, inject, Input } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { TermComponent } from './term.component';
@@ -15,13 +15,16 @@ interface FrameworkData { value: string; criterion: string; }
   standalone: true,
   imports: [CommonModule, FormsModule, TermComponent],
   template: `
-    <div id="debate-flow" class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 h-full flex flex-col">
+    <div id="debate-flow" class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 h-full flex flex-col relative">
+      <!-- Read-Only Overlay -->
+      <div *ngIf="readOnly()" class="absolute top-2 right-4 bg-amber-100 text-amber-800 text-xs font-bold px-2 py-1 rounded border border-amber-200 z-10">Read Only View</div>
+      
       <div class="mb-4 flex items-center justify-between">
         <div>
           <h2 class="font-bold text-slate-700">Interactive Flow Sheet</h2>
           <p class="text-xs text-slate-500">Star <span class="text-purple-600 font-bold">★ Voting Issues</span> to track winning arguments.</p>
         </div>
-        <button (click)="resetFlow()" class="text-xs text-red-400 hover:text-red-600 underline" aria-label="Clear All Notes">Clear All</button>
+        <button *ngIf="!readOnly()" (click)="resetFlow()" class="text-xs text-red-400 hover:text-red-600 underline" aria-label="Clear All Notes">Clear All</button>
       </div>
       <div class="flex-1 overflow-x-auto pb-12" (click)="closeMenus()"> 
         <div class="flex h-full min-w-max divide-x divide-slate-200 border border-slate-200 rounded-lg bg-slate-50">
@@ -32,18 +35,20 @@ interface FrameworkData { value: string; criterion: string; }
                 <div class="text-[10px] font-bold text-indigo-400 uppercase tracking-widest mb-2 text-center">Framework</div>
                 <div class="flex items-center gap-2 mb-2">
                   <span class="text-xs font-bold text-indigo-700 w-16 text-right"><app-term lookup="Value Premise">Value</app-term>:</span>
-                  <input type="text" [(ngModel)]="frameworks()[col.id].value" (ngModelChange)="saveData()" placeholder="e.g. Justice" class="flex-1 text-sm font-bold text-indigo-900 bg-white border border-indigo-100 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500" aria-label="Value Premise">
+                  <input type="text" [(ngModel)]="frameworks()[col.id].value" (ngModelChange)="saveData()" [disabled]="readOnly()" placeholder="e.g. Justice" class="flex-1 text-sm font-bold text-indigo-900 bg-white border border-indigo-100 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500" aria-label="Value Premise">
                 </div>
                 <div class="flex items-center gap-2">
                   <span class="text-xs font-bold text-indigo-700 w-16 text-right"><app-term lookup="Value Criterion">Criterion</app-term>:</span>
-                  <input type="text" [(ngModel)]="frameworks()[col.id].criterion" (ngModelChange)="saveData()" placeholder="e.g. Social Welfare" class="flex-1 text-sm font-medium text-indigo-800 bg-white border border-indigo-100 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500" aria-label="Value Criterion">
+                  <input type="text" [(ngModel)]="frameworks()[col.id].criterion" (ngModelChange)="saveData()" [disabled]="readOnly()" placeholder="e.g. Social Welfare" class="flex-1 text-sm font-medium text-indigo-800 bg-white border border-indigo-100 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500" aria-label="Value Criterion">
                 </div>
               </div>
               <div *ngFor="let arg of getArgsForCol(i)" class="relative p-3 rounded-lg border shadow-sm transition-all group/card" [ngClass]="{'bg-purple-50 border-purple-300 ring-1 ring-purple-200 shadow-md': arg.isVoter, 'bg-green-50 border-green-200 opacity-70': !arg.isVoter && arg.status === 'addressed', 'bg-red-50 border-red-200': !arg.isVoter && arg.status === 'dropped', 'bg-white border-slate-200': !arg.isVoter && arg.status === 'open'}">
                 <div *ngIf="isLinkedToPrevious(arg)" class="absolute -left-3 top-4 w-3 h-[2px] bg-slate-300"></div>
-                <div *ngIf="editingId() !== arg.id" (click)="editArg(arg.id, $event)" class="text-sm text-slate-800 whitespace-pre-wrap cursor-text min-h-[1.5rem]">{{ arg.text }}</div>
-                <textarea *ngIf="editingId() === arg.id" [(ngModel)]="arg.text" (blur)="stopEditing()" (click)="$event.stopPropagation()" (keydown.enter)="$event.preventDefault(); stopEditing()" class="w-full text-sm p-1 border rounded focus:ring-2 focus:ring-blue-500 bg-white" autoFocus></textarea>
-                <div class="mt-2 flex justify-between items-center opacity-0 group-hover/card:opacity-100 transition-opacity">
+                <div *ngIf="editingId() !== arg.id" (click)="!readOnly() && editArg(arg.id, $event)" class="text-sm text-slate-800 whitespace-pre-wrap cursor-text min-h-[1.5rem]">{{ arg.text }}</div>
+                <textarea *ngIf="editingId() === arg.id && !readOnly()" [(ngModel)]="arg.text" (blur)="stopEditing()" (click)="$event.stopPropagation()" (keydown.enter)="$event.preventDefault(); stopEditing()" class="w-full text-sm p-1 border rounded focus:ring-2 focus:ring-blue-500 bg-white" autoFocus></textarea>
+                
+                <!-- Controls (Only visible if NOT read-only) -->
+                <div *ngIf="!readOnly()" class="mt-2 flex justify-between items-center opacity-0 group-hover/card:opacity-100 transition-opacity">
                   <div class="flex gap-1 items-center">
                     <button (click)="setDrop(arg); $event.stopPropagation()" title="Drop" class="p-1 hover:text-red-600 text-slate-400"><span class="font-bold text-xs">✕</span></button>
                     <button (click)="setAddressed(arg); $event.stopPropagation()" title="Address" class="p-1 hover:text-green-600 text-slate-400"><span class="font-bold text-xs">✓</span></button>
@@ -59,13 +64,15 @@ interface FrameworkData { value: string; criterion: string; }
                     </div>
                   </div>
                 </div>
+                
+                <!-- Status Indicators -->
                 <div *ngIf="arg.status === 'dropped' && !arg.isVoter" class="absolute -top-2 -right-2 bg-red-500 text-white text-[10px] px-2 py-0.5 rounded-full font-bold shadow-sm z-10">DROP</div>
                 <div *ngIf="arg.isVoter" class="absolute -top-2 -right-2 bg-purple-600 text-white text-[10px] px-2 py-0.5 rounded-full font-bold shadow-sm z-10 flex items-center gap-1"><span>★</span> VOTER</div>
                 <div class="mt-1 pt-1 border-t border-slate-100/50">
-                   <input [(ngModel)]="arg.comments" (ngModelChange)="persistArgs()" placeholder="Add note..." class="w-full text-[10px] p-0.5 bg-transparent border-none focus:ring-0 placeholder:text-slate-300 text-slate-500 italic">
+                   <input [(ngModel)]="arg.comments" (ngModelChange)="persistArgs()" [disabled]="readOnly()" placeholder="Add note..." class="w-full text-[10px] p-0.5 bg-transparent border-none focus:ring-0 placeholder:text-slate-300 text-slate-500 italic">
                 </div>
               </div>
-              <div class="mt-2"><input type="text" [placeholder]="col.isCx ? '+ Note Admission...' : '+ New Point...'" (keydown.enter)="addArg($event, i)" class="w-full text-xs p-2 bg-transparent border border-dashed border-slate-300 rounded hover:bg-white focus:ring-2 focus:ring-blue-500 transition-all" aria-label="Add new argument"></div>
+              <div *ngIf="!readOnly()" class="mt-2"><input type="text" [placeholder]="col.isCx ? '+ Note Admission...' : '+ New Point...'" (keydown.enter)="addArg($event, i)" class="w-full text-xs p-2 bg-transparent border border-dashed border-slate-300 rounded hover:bg-white focus:ring-2 focus:ring-blue-500 transition-all" aria-label="Add new argument"></div>
             </div>
           </div>
         </div>
@@ -88,17 +95,38 @@ export class FlowComponent {
   frameworks = signal<Record<string, FrameworkData>>({ '1AC': { value: '', criterion: '' }, '1NC': { value: '', criterion: '' } });
   editingId = signal<string | null>(null);
   activeLinkId = signal<string | null>(null);
+  readOnly = signal(false);
+
+  // Input to set flow data for read-only mode
+  @Input() set viewOnlyFlow(data: { args: DebateArgument[], frameworks: Record<string, FrameworkData> } | undefined) {
+      if (data) {
+          this.arguments.set(data.args || []);
+          this.frameworks.set(data.frameworks || { '1AC': { value: '', criterion: '' }, '1NC': { value: '', criterion: '' } });
+          this.readOnly.set(true);
+      } else {
+          this.readOnly.set(false);
+      }
+  }
 
   constructor() {
     this.loadData();
+    
+    // Save to local storage only if editing
     effect(() => {
-      localStorage.setItem('ld-flow-args', JSON.stringify(this.arguments()));
-      localStorage.setItem('ld-flow-frameworks', JSON.stringify(this.frameworks()));
+      if (!this.readOnly()) {
+          localStorage.setItem('ld-flow-args', JSON.stringify(this.arguments()));
+          localStorage.setItem('ld-flow-frameworks', JSON.stringify(this.frameworks()));
+          
+          // Sync to service for submission
+          this.tournament.currentFlow.set(this.arguments());
+          this.tournament.currentFrameworks.set(this.frameworks());
+      }
     });
+    
     effect(() => {
       const activeId = this.tournament.activeDebateId();
       const lastDebateId = localStorage.getItem('ld-current-debate-id');
-      if (activeId !== lastDebateId) {
+      if (activeId !== lastDebateId && !this.readOnly()) {
         this.internalReset();
         if (activeId) localStorage.setItem('ld-current-debate-id', activeId);
         else localStorage.removeItem('ld-current-debate-id');
@@ -123,10 +151,18 @@ export class FlowComponent {
     } catch(e) { this.arguments.set([]); }
   }
 
-  saveData() { localStorage.setItem('ld-flow-frameworks', JSON.stringify(this.frameworks())); }
-  persistArgs() { this.arguments.update(a => [...a]); }
-  toggleVoter(arg: DebateArgument) { this.arguments.update(args => args.map(a => a.id === arg.id ? { ...a, isVoter: !a.isVoter } : a)); }
+  saveData() { 
+      if(!this.readOnly()) {
+          localStorage.setItem('ld-flow-frameworks', JSON.stringify(this.frameworks())); 
+          this.tournament.currentFrameworks.set(this.frameworks());
+      }
+  }
+  persistArgs() { if(!this.readOnly()) this.arguments.update(a => [...a]); }
+  
+  toggleVoter(arg: DebateArgument) { if(!this.readOnly()) this.arguments.update(args => args.map(a => a.id === arg.id ? { ...a, isVoter: !a.isVoter } : a)); }
+  
   createLink(originalArg: DebateArgument, targetIdx: number) { 
+    if(this.readOnly()) return;
     this.updateArgStatus(originalArg.id, 'addressed');
     const isSkip = targetIdx > originalArg.colIdx + 1;
     const sourceName = this.columns[originalArg.colIdx].id; 
@@ -136,22 +172,25 @@ export class FlowComponent {
     this.arguments.update(args => [...args, { id: crypto.randomUUID(), text: `${prefix} "${originalArg.text.substring(0, 15)}..."`, colIdx: targetIdx, status: 'open', parentId: originalArg.id, isVoter: false, comments: '' }]);
     this.activeLinkId.set(null);
   }
+  
   addArg(event: any, colIdx: number) { 
+    if(this.readOnly()) return;
     const text = event.target.value.trim();
     if (!text) return;
     this.arguments.update(args => [...args, { id: crypto.randomUUID(), text, colIdx, status: 'open', parentId: null, isVoter: false, comments: '' }]);
     event.target.value = '';
   }
+  
   getArgsForCol(idx: number) { return this.arguments().filter(a => a.colIdx === idx); }
   getFutureColumns(currentIdx: number) { return this.columns.map((col, idx) => ({ name: col.id, isCx: col.isCx, idx })).filter(c => c.idx > currentIdx); }
   isLinkedToPrevious(arg: DebateArgument): boolean { if (!arg.parentId) return false; const parent = this.arguments().find(a => a.id === arg.parentId); return parent ? (arg.colIdx === parent.colIdx + 1) : false; }
   toggleLinkMenu(id: string, e: Event) { e.stopPropagation(); this.activeLinkId.set(this.activeLinkId() === id ? null : id); }
   closeMenus() { this.activeLinkId.set(null); }
-  deleteArg(arg: DebateArgument) { if (confirm('Delete note?')) this.arguments.update(args => args.filter(a => a.id !== arg.id)); }
-  setDrop(arg: DebateArgument) { this.updateArgStatus(arg.id, 'dropped'); }
-  setAddressed(arg: DebateArgument) { this.updateArgStatus(arg.id, 'addressed'); }
+  deleteArg(arg: DebateArgument) { if (!this.readOnly() && confirm('Delete note?')) this.arguments.update(args => args.filter(a => a.id !== arg.id)); }
+  setDrop(arg: DebateArgument) { if(!this.readOnly()) this.updateArgStatus(arg.id, 'dropped'); }
+  setAddressed(arg: DebateArgument) { if(!this.readOnly()) this.updateArgStatus(arg.id, 'addressed'); }
   updateArgStatus(id: string, status: any) { this.arguments.update(args => args.map(a => a.id === id ? { ...a, status } : a)); }
-  editArg(id: string, e: Event) { e.stopPropagation(); this.editingId.set(id); }
+  editArg(id: string, e: Event) { if(!this.readOnly()) { e.stopPropagation(); this.editingId.set(id); } }
   stopEditing() { this.editingId.set(null); }
-  resetFlow() { if(confirm('Clear all notes?')) this.internalReset(); }
+  resetFlow() { if(!this.readOnly() && confirm('Clear all notes?')) this.internalReset(); }
 }

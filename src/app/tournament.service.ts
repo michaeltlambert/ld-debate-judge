@@ -39,6 +39,7 @@ export interface Debate {
   negName: string;
   judgeIds: string[]; 
   status: 'Open' | 'Closed';
+  createdAt: number; // Added for sorting
 }
 
 export interface UserProfile {
@@ -112,7 +113,6 @@ export class TournamentService {
   
   activeDebateId = signal<string | null>(null);
   
-  // Current active flow state
   currentFlow = signal<DebateArgument[]>([]);
   currentFrameworks = signal<Record<string, FrameworkData>>({});
 
@@ -384,7 +384,7 @@ export class TournamentService {
 
   private startListeners(tid: string) {
     if (!this.db) return;
-    this.stopListeners(); // Clean up old tournament listeners
+    this.stopListeners(); 
     
     const qJudges = query(this.getCollection('judges'), where('tournamentId', '==', tid));
     this.collectionUnsubscribes.push(onSnapshot(qJudges, (s) => this.judges.set(s.docs.map(d => ({id:d.id, ...d.data()} as UserProfile)))));
@@ -489,7 +489,7 @@ export class TournamentService {
     if (this.isTournamentClosed()) return;
     const tid = this.tournamentId();
     if (!tid) throw new Error("No tournament context found.");
-    const debate = { tournamentId: tid, topic, affId, affName, negId, negName, judgeIds: [], status: 'Open' as const, type, stage };
+    const debate = { tournamentId: tid, topic, affId, affName, negId, negName, judgeIds: [], status: 'Open' as const, type, stage, createdAt: Date.now() };
     if (!this.db) { this.debates.update(d => [...d, { id: 'loc-'+Date.now(), ...debate } as Debate]); return; }
     await addDoc(this.getCollection('debates'), debate);
   }
