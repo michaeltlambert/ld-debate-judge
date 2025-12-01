@@ -1,20 +1,24 @@
 # DebateMate: Tournament Edition
 
 ## 📘 Project Overview
-DebateMate is a real-time Lincoln-Douglas adjudication system with support for **Preliminary** and **Elimination** rounds.
+DebateMate is a real-time Lincoln-Douglas adjudication system.
 
-### **New Features**
-* **Unlimited Prelims:** Assign Round numbers manually (1, 2, 10, etc.).
-* **Manual Elimination:** Admins can manually eliminate or reinstate debaters from the participant list.
-* **Bracket View:** Visual graph of the elimination stage in the Admin panel.
+### **New Features: Tournament Management**
+* **Admin Portal:** Central hub to create, view, and manage all tournaments.
+* **Auto-Codes:** Tournaments get a unique 6-digit code upon creation.
+* **Multi-Admin:** Any admin can administer any open tournament.
+* **Archive Mode:** Closed tournaments become read-only for historical review.
 
-### **Tech Stack**
-* **Framework:** Angular v21 (Signals)
-* **Backend:** Firebase Firestore
-* **Styling:** Tailwind CSS v4
+## 🔧 Configuration (Required)
+To fix "auth/operation-not-allowed" or "auth/unauthorized-domain":
+
+1.  Go to **Firebase Console > Authentication > Sign-in method**.
+    * Click **Add new provider** -> **Google** -> Toggle **Enable** -> **Save**.
+    * Click **Add new provider** -> **Facebook** -> Toggle **Enable** -> **Save**.
+2.  Go to **Authentication > Settings > Authorized domains**.
+    * Add `localhost` to the list.
+3.  Update `src/app/config.ts` with your API Keys.
 
 ## 🚀 Getting Started
 1.  **Install:** `npm install`
 2.  **Run:** `npm start`
-3.  **Workflow:**
-    * **Admin:** Manage elimination status manually via the participant list. Create unlimited prelim rounds using the number input.

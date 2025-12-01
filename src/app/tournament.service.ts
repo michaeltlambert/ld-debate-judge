@@ -2,18 +2,28 @@ import { Injectable, signal, computed } from '@angular/core';
 import { initializeApp } from 'firebase/app';
 import { 
   getFirestore, collection, doc, addDoc, updateDoc, 
-  onSnapshot, setDoc, deleteDoc, query, where, getDocs
+  onSnapshot, setDoc, deleteDoc, query, where, getDocs, getDoc
 } from 'firebase/firestore';
 import { 
   getAuth, signInAnonymously, onAuthStateChanged, 
-  User, signInWithCustomToken, signOut 
+  User, signInWithCustomToken, signOut, GoogleAuthProvider, FacebookAuthProvider, 
+  signInWithPopup, signInWithRedirect, getRedirectResult,
+  createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile
 } from 'firebase/auth';
 import { AppConfig } from './config';
 
 // --- DATA MODELS ---
 
 export type RoundType = 'Prelim' | 'Elimination';
-export type RoundStage = string; // Changed to string to support dynamic "Round X"
+export type RoundStage = string;
+
+export interface TournamentMeta {
+  id: string;
+  name: string;
+  ownerId: string;
+  status: 'Active' | 'Closed';
+  createdAt: number;
+}
 
 export interface Debate {
   id: string;
@@ -31,8 +41,13 @@ export interface Debate {
 
 export interface UserProfile {
   id: string; 
-  tournamentId: string; 
+  // FIX: Allow null/undefined for users not yet in a tournament
+  tournamentId?: string | null; 
   name: string;
+  email?: string;
+  photoURL?: string;
+  address?: string;
+  phone?: string;
   isOnline: boolean;
   role: 'Admin' | 'Judge' | 'Debater';
   status?: 'Active' | 'Eliminated'; 
@@ -48,6 +63,7 @@ export interface RoundResult {
   negScore: number;
   decision: 'Aff' | 'Neg';
   rfd: string;
+  timestamp: number;
 }
 
 export interface DebaterStats {
@@ -72,19 +88,28 @@ export class TournamentService {
   userProfile = signal<UserProfile | null>(null);
   userRole = signal<'Admin' | 'Judge' | 'Debater'>('Debater');
   
-  // Current Scope
   tournamentId = signal<string | null>(null);
+  tournamentName = signal<string>(''); 
   
-  // Collections
   judges = signal<UserProfile[]>([]);
   debaters = signal<UserProfile[]>([]);
   debates = signal<Debate[]>([]);
   results = signal<RoundResult[]>([]);
   notifications = signal<Notification[]>([]);
   
+  // Tournament Management
+  // FIX: Renamed from allTournaments to myTournaments to match component usage
+  myTournaments = signal<TournamentMeta[]>([]);
+  
+  currentTournamentStatus = computed(() => {
+      const tid = this.tournamentId();
+      return this.myTournaments().find(t => t.id === tid)?.status || 'Active';
+  });
+  
+  isTournamentClosed = computed(() => this.currentTournamentStatus() === 'Closed');
+  
   activeDebateId = signal<string | null>(null);
 
-  // Standings (Scoped to current tournament)
   standings = computed(() => {
     const stats: Record<string, DebaterStats> = {};
     this.debaters().forEach(d => {
@@ -114,6 +139,7 @@ export class TournamentService {
   private appId: string;
   private profileUnsubscribe: (() => void) | null = null;
   private notificationUnsubscribe: (() => void) | null = null;
+  private tournamentUnsubscribe: (() => void) | null = null;
 
   constructor() {
     this.appId = (window as any).__app_id || 'default-app';
@@ -135,71 +161,241 @@ export class TournamentService {
   }
 
   private async initAuth() {
+    try {
+      const redirectResult = await getRedirectResult(this.auth);
+      if (redirectResult?.user) {
+        this.user.set(redirectResult.user);
+        if (!this.restoreSession(redirectResult.user.uid)) {
+           this.recoverProfile(redirectResult.user.uid);
+        }
+        return;
+      }
+    } catch(e) { console.warn("Redirect Result check failed:", e); }
+
     const initialToken = (window as any).__initial_auth_token;
-    if (initialToken) await signInWithCustomToken(this.auth, initialToken);
-    else await signInAnonymously(this.auth);
+    if (initialToken && !this.auth.currentUser) await signInWithCustomToken(this.auth, initialToken);
 
     onAuthStateChanged(this.auth, (u) => {
       this.user.set(u);
-      if (u) this.restoreSession(u.uid);
+      if (u) {
+        if (!this.restoreSession(u.uid)) {
+             this.recoverProfile(u.uid);
+        }
+      }
     });
   }
 
-  private restoreSession(uid: string) {
+  async registerWithEmail(email: string, pass: string, name: string, role: any, tid: string | null) {
+     if (!this.auth) {
+         await this.setProfile(name, role, tid);
+         return;
+     }
+     if (tid) {
+         const taken = await this.isNameTaken(name, tid);
+         if (taken) throw new Error(`Name "${name}" is already taken.`);
+     }
+     const cred = await createUserWithEmailAndPassword(this.auth, email, pass);
+     await updateProfile(cred.user, { displayName: name });
+     await this.setProfile(name, role, tid);
+  }
+
+  async loginWithEmail(email: string, pass: string) {
+      if (!this.auth) throw new Error("Email Login requires Firebase config.");
+      await signInWithEmailAndPassword(this.auth, email, pass);
+  }
+
+  async loginWithGoogle() {
+    if (!this.auth) return;
+    const provider = new GoogleAuthProvider();
+    try { await signInWithPopup(this.auth, provider); } 
+    catch(e) { await signInWithRedirect(this.auth, provider); }
+  }
+
+  async loginWithFacebook() {
+    if (!this.auth) return;
+    const provider = new FacebookAuthProvider();
+    try { await signInWithPopup(this.auth, provider); } 
+    catch(e) { await signInWithRedirect(this.auth, provider); }
+  }
+
+  private restoreSession(uid: string): boolean {
     const savedName = localStorage.getItem('debate-user-name');
     const savedRole = localStorage.getItem('debate-user-role') as any;
     const savedTid = localStorage.getItem('debate-tournament-id');
+    const savedTName = localStorage.getItem('debate-tournament-name') || '';
 
-    if (savedName && savedRole && savedTid) {
-      this.tournamentId.set(savedTid);
-      this.userRole.set(savedRole);
-      this.userProfile.set({ id: uid, tournamentId: savedTid, name: savedName, role: savedRole, isOnline: true });
-      this.updateCloudProfile(uid, savedName, savedRole, savedTid);
-      this.watchMyProfile(uid, savedRole);
-      this.watchNotifications(uid);
-      this.startListeners(savedTid);
+    if (savedName && savedRole) {
+       this.activateSession(uid, savedName, savedRole, savedTid, savedTName);
+       return true;
     }
+    return false;
   }
 
-  private startListeners(tid: string) {
-    if (!this.db) return;
-    
-    const qJudges = query(this.getCollection('judges'), where('tournamentId', '==', tid));
-    onSnapshot(qJudges, (s) => this.judges.set(s.docs.map(d => ({id:d.id, ...d.data()} as UserProfile))));
+  private async recoverProfile(uid: string) {
+      if (!this.db) return;
+      const collections = ['judges', 'debaters', 'admins'];
+      for (const col of collections) {
+          const snap = await getDoc(doc(this.db, 'artifacts', this.appId, 'public', 'data', col, uid));
+          if (snap.exists()) {
+              const data = snap.data() as UserProfile;
+              this.activateSession(uid, data.name, data.role, data.tournamentId, '');
+              if (data.tournamentId) {
+                  getDoc(doc(this.db, 'artifacts', this.appId, 'public', 'data', 'tournaments', data.tournamentId))
+                    .then(t => { if(t.exists()) this.tournamentName.set((t.data() as any).name); });
+              }
+              return;
+          }
+      }
+  }
 
-    const qDebaters = query(this.getCollection('debaters'), where('tournamentId', '==', tid));
-    onSnapshot(qDebaters, (s) => this.debaters.set(s.docs.map(d => ({id:d.id, ...d.data()} as UserProfile))));
+  private activateSession(uid: string, name: string, role: any, tid: string | null | undefined, tName: string) {
+      if (tid) this.tournamentId.set(tid); else this.tournamentId.set(null);
+      if (tName) this.tournamentName.set(tName);
 
-    const qDebates = query(this.getCollection('debates'), where('tournamentId', '==', tid));
-    onSnapshot(qDebates, (s) => this.debates.set(s.docs.map(d => ({id:d.id, ...d.data()} as Debate))));
-
-    const qResults = query(this.getCollection('results'), where('tournamentId', '==', tid));
-    onSnapshot(qResults, (s) => this.results.set(s.docs.map(d => ({id:d.id, ...d.data()} as RoundResult))));
+      this.userRole.set(role);
+      // FIX: Ensure tournamentId handles undefined/null correctly
+      this.userProfile.set({ id: uid, tournamentId: tid || null, name: name, role: role, isOnline: true });
+      
+      this.updateCloudProfile(uid, name, role, tid);
+      
+      if (tid) {
+        this.watchMyProfile(uid, role);
+        this.watchNotifications(uid);
+        this.startListeners(tid);
+      }
+      
+      if (role === 'Admin') this.fetchAllTournaments();
   }
   
-  async setProfile(name: string, role: 'Admin' | 'Judge' | 'Debater', tid: string) {
+  async setProfile(name: string, role: 'Admin' | 'Judge' | 'Debater', tid: string | null, tName: string = '') {
     let currentUser = this.user();
     if (!currentUser && this.auth) currentUser = this.auth.currentUser;
     const uid = currentUser?.uid || 'demo-' + Math.random().toString(36).substring(7);
     
-    const taken = await this.isNameTaken(name, tid);
-    if (taken) throw new Error(`Name "${name}" is already taken in this tournament.`);
+    if (!this.userProfile() && tid) {
+        const taken = await this.isNameTaken(name, tid);
+        if (taken && !currentUser) throw new Error(`Name "${name}" is already taken.`);
+    }
 
     this.userRole.set(role);
-    this.tournamentId.set(tid);
+    if (tid) this.tournamentId.set(tid); else this.tournamentId.set(null);
+    if (tName) this.tournamentName.set(tName);
     
-    const profile: UserProfile = { id: uid, tournamentId: tid, name, role, isOnline: true, status: 'Active' };
-
+    // FIX: tournamentId is optional/nullable
+    const profile: UserProfile = { id: uid, tournamentId: tid || null, name, role, isOnline: true, status: 'Active' };
     localStorage.setItem('debate-user-name', name);
     localStorage.setItem('debate-user-role', role);
-    localStorage.setItem('debate-tournament-id', tid);
+    if (tid) localStorage.setItem('debate-tournament-id', tid); else localStorage.removeItem('debate-tournament-id');
+    if (tName) localStorage.setItem('debate-tournament-name', tName);
     
     this.userProfile.set(profile);
     await this.updateCloudProfile(uid, name, role, tid);
     
-    this.watchMyProfile(uid, role);
-    this.watchNotifications(uid);
-    this.startListeners(tid);
+    if (role === 'Admin') {
+        await this.createTournamentRecord(tid || 'demo', uid); // Handle null tid for admins creating first one
+        this.fetchAllTournaments();
+    }
+
+    if (tid) {
+      this.watchMyProfile(uid, role);
+      this.watchNotifications(uid);
+      this.startListeners(tid);
+    }
+  }
+
+  private async createTournamentRecord(tid: string, uid: string) {
+      if (!this.db || tid === 'demo') return;
+      const ref = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'tournaments', tid);
+      const snap = await getDoc(ref);
+      if (!snap.exists()) {
+          await setDoc(ref, { id: tid, ownerId: uid, status: 'Active', createdAt: Date.now() });
+      }
+  }
+
+  private fetchAllTournaments() {
+      if (!this.db) {
+          // FIX: Explicit type annotation for update
+          this.myTournaments.update((t: TournamentMeta[]) => [...t, { id: this.tournamentId() || 'demo', name: 'Demo', ownerId: 'me', status: 'Active', createdAt: Date.now() }]);
+          return;
+      }
+      const q = query(this.getCollection('tournaments')); // List all
+      if (this.tournamentUnsubscribe) this.tournamentUnsubscribe();
+      this.tournamentUnsubscribe = onSnapshot(q, (s) => {
+          this.myTournaments.set(s.docs.map(d => d.data() as TournamentMeta));
+      });
+  }
+
+  async createNewTournament(name: string) {
+      const tid = Math.random().toString(36).substring(2, 8).toUpperCase();
+      if (!this.db) {
+          this.myTournaments.update((t: TournamentMeta[]) => [...t, { id: tid, name, ownerId: this.userProfile()!.id, status: 'Active', createdAt: Date.now() }]);
+          return tid;
+      }
+      const ref = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'tournaments', tid);
+      await setDoc(ref, { 
+          id: tid, 
+          name: name,
+          ownerId: this.userProfile()!.id, 
+          status: 'Active', 
+          createdAt: Date.now() 
+      });
+      return tid;
+  }
+
+  async selectTournament(tid: string, name: string) {
+      this.tournamentId.set(tid);
+      this.tournamentName.set(name);
+      localStorage.setItem('debate-tournament-id', tid);
+      localStorage.setItem('debate-tournament-name', name);
+      
+      this.activeDebateId.set(null);
+      this.judges.set([]);
+      this.debaters.set([]);
+      this.debates.set([]);
+      this.results.set([]);
+      
+      this.startListeners(tid);
+      const p = this.userProfile();
+      if (p) await this.updateCloudProfile(p.id, p.name, p.role, tid);
+  }
+
+  async closeTournament(tid: string) {
+      if (!this.db) {
+          // FIX: Typed parameter for map
+          this.myTournaments.update((t: TournamentMeta[]) => t.map(x => x.id === tid ? { ...x, status: 'Closed' } : x));
+          return;
+      }
+      await updateDoc(doc(this.db, 'artifacts', this.appId, 'public', 'data', 'tournaments', tid), { status: 'Closed' });
+  }
+
+  async updatePersonalInfo(data: Partial<UserProfile>) {
+      const current = this.userProfile();
+      if (!current) return;
+      const updated = { ...current, ...data };
+      this.userProfile.set(updated);
+      await this.updateCloudProfile(current.id, updated.name, current.role, current.tournamentId);
+  }
+
+  private async updateCloudProfile(uid: string, name: string, role: string, tid: string | null | undefined) {
+    if (this.db) {
+      try {
+        const collectionName = role === 'Debater' ? 'debaters' : (role === 'Judge' ? 'judges' : 'admins');
+        const ref = doc(this.db, 'artifacts', this.appId, 'public', 'data', collectionName, uid);
+        await setDoc(ref, { id: uid, tournamentId: tid || null, name, role, isOnline: true, status: 'Active' }, { merge: true });
+      } catch (e) {}
+    }
+  }
+  
+  private startListeners(tid: string) {
+    if (!this.db) return;
+    const qJudges = query(this.getCollection('judges'), where('tournamentId', '==', tid));
+    onSnapshot(qJudges, (s) => this.judges.set(s.docs.map(d => ({id:d.id, ...d.data()} as UserProfile))));
+    const qDebaters = query(this.getCollection('debaters'), where('tournamentId', '==', tid));
+    onSnapshot(qDebaters, (s) => this.debaters.set(s.docs.map(d => ({id:d.id, ...d.data()} as UserProfile))));
+    const qDebates = query(this.getCollection('debates'), where('tournamentId', '==', tid));
+    onSnapshot(qDebates, (s) => this.debates.set(s.docs.map(d => ({id:d.id, ...d.data()} as Debate))));
+    const qResults = query(this.getCollection('results'), where('tournamentId', '==', tid));
+    onSnapshot(qResults, (s) => this.results.set(s.docs.map(d => ({id:d.id, ...d.data()} as RoundResult))));
   }
 
   private async isNameTaken(name: string, tid: string): Promise<boolean> {
@@ -212,24 +408,11 @@ export class TournamentService {
     return !sD.empty;
   }
 
-  private async updateCloudProfile(uid: string, name: string, role: string, tid: string) {
-    if (this.db) {
-      try {
-        const collectionName = role === 'Debater' ? 'debaters' : (role === 'Judge' ? 'judges' : null);
-        if (collectionName) {
-          const ref = doc(this.db, 'artifacts', this.appId, 'public', 'data', collectionName, uid);
-          await setDoc(ref, { id: uid, tournamentId: tid, name, role, isOnline: true, status: 'Active' }, { merge: true });
-        }
-      } catch (e) {}
-    }
-  }
-
   private watchMyProfile(uid: string, role: string) {
     if (!this.db || role === 'Admin') return;
     const collectionName = role === 'Debater' ? 'debaters' : (role === 'Judge' ? 'judges' : null);
     if (!collectionName) return;
     if (this.profileUnsubscribe) this.profileUnsubscribe();
-    
     const ref = doc(this.db, 'artifacts', this.appId, 'public', 'data', collectionName, uid);
     this.profileUnsubscribe = onSnapshot(ref, (docSnap) => {
         if (!docSnap.exists() && this.userProfile()) this.logout();
@@ -245,15 +428,12 @@ export class TournamentService {
       this.notifications.set(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Notification)));
     });
   }
-
+  
   async sendNudge(judgeId: string) {
     if (!this.db) return;
-    await addDoc(this.getCollection('notifications'), {
-      tournamentId: this.tournamentId(),
-      recipientId: judgeId,
-      message: "Please submit your ballot for the current round!",
-      timestamp: Date.now()
-    });
+    const tid = this.tournamentId();
+    if (!tid) return;
+    await addDoc(this.getCollection('notifications'), { tournamentId: tid, recipientId: judgeId, message: "Please submit your ballot!", timestamp: Date.now() });
   }
 
   async dismissNotification(id: string) {
@@ -264,127 +444,116 @@ export class TournamentService {
   async logout() {
     if (this.profileUnsubscribe) this.profileUnsubscribe();
     if (this.notificationUnsubscribe) this.notificationUnsubscribe();
+    if (this.tournamentUnsubscribe) this.tournamentUnsubscribe();
     
     const profile = this.userProfile();
     if (profile && this.db) {
         const collectionName = profile.role === 'Debater' ? 'debaters' : (profile.role === 'Judge' ? 'judges' : null);
-        if (collectionName) {
-             try { await deleteDoc(doc(this.db, 'artifacts', this.appId, 'public', 'data', collectionName, profile.id)); } catch(e) {}
-        }
+        if (collectionName) try { await deleteDoc(doc(this.db, 'artifacts', this.appId, 'public', 'data', collectionName, profile.id)); } catch(e) {}
     }
     if (this.auth) await signOut(this.auth);
-    localStorage.removeItem('debate-user-name');
-    localStorage.removeItem('debate-user-role');
-    localStorage.removeItem('debate-tournament-id');
-    
+    localStorage.clear();
     this.user.set(null);
     this.userProfile.set(null);
     this.tournamentId.set(null);
+    this.tournamentName.set('');
     this.activeDebateId.set(null);
-    
-    this.judges.set([]);
-    this.debaters.set([]);
-    this.debates.set([]);
-    this.results.set([]);
+    this.myTournaments.set([]);
   }
 
   async kickUser(userId: string, role: 'Judge' | 'Debater') {
       if (!this.db) return;
+      if (this.isTournamentClosed()) return;
       const collectionName = role === 'Debater' ? 'debaters' : 'judges';
       await deleteDoc(doc(this.db, 'artifacts', this.appId, 'public', 'data', collectionName, userId));
   }
 
-  // Manually eliminate/reinstate
   async toggleDebaterStatus(debaterId: string, currentStatus: string | undefined) {
+    if (this.isTournamentClosed()) return;
     const newStatus = currentStatus === 'Eliminated' ? 'Active' : 'Eliminated';
-    await this.setDebaterStatus(debaterId, newStatus);
+    if (this.db) {
+        const ref = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'debaters', debaterId);
+        await updateDoc(ref, { status: newStatus });
+    }
   }
 
   async createDebate(topic: string, affId: string, affName: string, negId: string, negName: string, type: RoundType, stage: RoundStage) {
-    const tid = this.tournamentId() || 'demo';
-    const debate = { 
-        tournamentId: tid, 
-        topic, affId, affName, negId, negName, judgeIds: [], status: 'Open' as const,
-        type, stage
-    };
-    if (!this.db) { 
-        this.debates.update(d => [...d, { id: 'loc-'+Date.now(), ...debate } as Debate]); 
-        return; 
-    }
+    if (this.isTournamentClosed()) return;
+    const tid = this.tournamentId();
+    if (!tid) throw new Error("No tournament context found.");
+    const debate = { tournamentId: tid, topic, affId, affName, negId, negName, judgeIds: [], status: 'Open' as const, type, stage };
+    if (!this.db) { this.debates.update(d => [...d, { id: 'loc-'+Date.now(), ...debate } as Debate]); return; }
     await addDoc(this.getCollection('debates'), debate);
   }
 
   async deleteDebate(debateId: string) {
+    if (this.isTournamentClosed()) return;
     if (!this.db) { this.debates.update(d => d.filter(x => x.id !== debateId)); return; }
     await deleteDoc(doc(this.db, 'artifacts', this.appId, 'public', 'data', 'debates', debateId));
   }
 
   async finalizeRound(debateId: string) {
+    if (this.isTournamentClosed()) return;
     const winner = this.getWinner(debateId);
     const debate = this.debates().find(d => d.id === debateId);
-    
     if (!debate) return;
-
     if (debate.type === 'Elimination' && winner !== 'Pending') {
         const loserId = winner === 'Aff' ? debate.negId : debate.affId;
-        await this.setDebaterStatus(loserId, 'Eliminated');
+        if (this.db) await updateDoc(doc(this.db, 'artifacts', this.appId, 'public', 'data', 'debaters', loserId), { status: 'Eliminated' });
     }
-
-    if (!this.db) { 
-        this.debates.update(d => d.map(x => x.id === debateId ? {...x, status: 'Closed'} : x)); 
-        return; 
-    }
-    const ref = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'debates', debateId);
-    await updateDoc(ref, { status: 'Closed' });
-  }
-
-  public async setDebaterStatus(debaterId: string, status: 'Active' | 'Eliminated') {
-    if (this.db) {
-        const ref = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'debaters', debaterId);
-        await updateDoc(ref, { status });
-    }
+    if (!this.db) { this.debates.update(d => d.map(x => x.id === debateId ? {...x, status: 'Closed'} : x)); return; }
+    await updateDoc(doc(this.db, 'artifacts', this.appId, 'public', 'data', 'debates', debateId), { status: 'Closed' });
   }
 
   async assignJudge(debateId: string, judgeId: string) {
+    if (this.isTournamentClosed()) return;
     if (!this.db) return; 
     const debate = this.debates().find(d => d.id === debateId);
     if (!debate) return;
     const newJudges = [...new Set([...debate.judgeIds, judgeId])].slice(0, 3);
-    const ref = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'debates', debateId);
-    await updateDoc(ref, { judgeIds: newJudges });
+    await updateDoc(doc(this.db, 'artifacts', this.appId, 'public', 'data', 'debates', debateId), { judgeIds: newJudges });
   }
 
   async removeJudge(debateId: string, judgeId: string) {
+    if (this.isTournamentClosed()) return;
     if (!this.db) return;
     const debate = this.debates().find(d => d.id === debateId);
     if (!debate) return;
-    const ref = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'debates', debateId);
-    await updateDoc(ref, { judgeIds: debate.judgeIds.filter(id => id !== judgeId) });
+    await updateDoc(doc(this.db, 'artifacts', this.appId, 'public', 'data', 'debates', debateId), { judgeIds: debate.judgeIds.filter(id => id !== judgeId) });
   }
 
   async submitBallot(debateId: string, result: Omit<RoundResult, 'id' | 'judgeId' | 'judgeName' | 'debateId' | 'tournamentId'>) {
     const debate = this.debates().find(d => d.id === debateId);
-    if (debate?.status === 'Closed') throw new Error("Round is closed.");
-
+    if (debate?.status === 'Closed' || this.isTournamentClosed()) throw new Error("Round is closed.");
     const uid = this.user()?.uid || 'anon';
     const name = this.userProfile()?.name || 'Anonymous';
-    const tid = this.tournamentId() || 'demo';
-    const finalResult = { 
-        ...result, 
-        tournamentId: tid,
-        debateId, judgeId: uid, judgeName: name, timestamp: Date.now() 
-    };
+    const tid = this.tournamentId();
+    if (!tid) throw new Error("No tournament context.");
 
+    const finalResult = { ...result, tournamentId: tid, debateId, judgeId: uid, judgeName: name, timestamp: Date.now() };
     if (this.db) {
         const ballotId = `${debateId}_${uid}`;
-        const ref = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'results', ballotId);
-        await setDoc(ref, finalResult, { merge: true });
+        await setDoc(doc(this.db, 'artifacts', this.appId, 'public', 'data', 'results', ballotId), finalResult, { merge: true });
     }
   }
   
-  private getCollection(name: string) {
-    return collection(this.db, 'artifacts', this.appId, 'public', 'data', name);
+  // Join an existing tournament
+  async joinTournament(code: string) {
+      const profile = this.userProfile();
+      if (!profile) return;
+      if (!this.db) return; // Offline can't join
+      
+      // Check if tournament exists
+      const snap = await getDoc(doc(this.db, 'artifacts', this.appId, 'public', 'data', 'tournaments', code));
+      if (!snap.exists()) throw new Error("Tournament code not found.");
+
+      const taken = await this.isNameTaken(profile.name, code);
+      if (taken) throw new Error(`Name "${profile.name}" is already used in this tournament.`);
+
+      await this.setProfile(profile.name, profile.role, code, (snap.data() as any).name);
   }
+  
+  private getCollection(name: string) { return collection(this.db, 'artifacts', this.appId, 'public', 'data', name); }
 
   getMyAssignments() {
     const uid = this.userProfile()?.id;
@@ -398,10 +567,13 @@ export class TournamentService {
     });
   }
 
-  getMyDebaterRecord() {
+  getMyDebaterRecord(): DebaterStats {
     const uid = this.userProfile()?.id;
-    if (!uid) return { wins: 0, losses: 0 };
-    return this.standings().find(s => s.id === uid) || { id: uid, name: '', wins: 0, losses: 0 };
+    // STRICT RETURN: Always returns DebaterStats object
+    if (!uid) return { id: 'unknown', name: 'Guest', wins: 0, losses: 0, status: 'Active' };
+    
+    const stats = this.standings().find(s => s.id === uid);
+    return stats || { id: uid, name: this.userProfile()?.name || 'Guest', wins: 0, losses: 0, status: 'Active' };
   }
 
   getWinner(debateId: string): 'Aff' | 'Neg' | 'Pending' {
