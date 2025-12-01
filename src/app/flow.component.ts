@@ -5,7 +5,7 @@ import { TermComponent } from './term.component';
 import { TournamentService } from './tournament.service';
 
 export interface DebateArgument {
-  id: string; text: string; colIdx: number; status: 'open' | 'addressed' | 'dropped'; parentId: string | null; isVoter?: boolean;
+  id: string; text: string; colIdx: number; status: 'open' | 'addressed' | 'dropped'; parentId: string | null; isVoter?: boolean; comments?: string;
 }
 interface ColumnDef { id: string; name: string; isCx: boolean; }
 interface FrameworkData { value: string; criterion: string; }
@@ -61,6 +61,9 @@ interface FrameworkData { value: string; criterion: string; }
                 </div>
                 <div *ngIf="arg.status === 'dropped' && !arg.isVoter" class="absolute -top-2 -right-2 bg-red-500 text-white text-[10px] px-2 py-0.5 rounded-full font-bold shadow-sm z-10">DROP</div>
                 <div *ngIf="arg.isVoter" class="absolute -top-2 -right-2 bg-purple-600 text-white text-[10px] px-2 py-0.5 rounded-full font-bold shadow-sm z-10 flex items-center gap-1"><span>★</span> VOTER</div>
+                <div class="mt-1 pt-1 border-t border-slate-100/50">
+                   <input [(ngModel)]="arg.comments" (ngModelChange)="persistArgs()" placeholder="Add note..." class="w-full text-[10px] p-0.5 bg-transparent border-none focus:ring-0 placeholder:text-slate-300 text-slate-500 italic">
+                </div>
               </div>
               <div class="mt-2"><input type="text" [placeholder]="col.isCx ? '+ Note Admission...' : '+ New Point...'" (keydown.enter)="addArg($event, i)" class="w-full text-xs p-2 bg-transparent border border-dashed border-slate-300 rounded hover:bg-white focus:ring-2 focus:ring-blue-500 transition-all" aria-label="Add new argument"></div>
             </div>
@@ -121,6 +124,7 @@ export class FlowComponent {
   }
 
   saveData() { localStorage.setItem('ld-flow-frameworks', JSON.stringify(this.frameworks())); }
+  persistArgs() { this.arguments.update(a => [...a]); }
   toggleVoter(arg: DebateArgument) { this.arguments.update(args => args.map(a => a.id === arg.id ? { ...a, isVoter: !a.isVoter } : a)); }
   createLink(originalArg: DebateArgument, targetIdx: number) { 
     this.updateArgStatus(originalArg.id, 'addressed');
@@ -129,13 +133,13 @@ export class FlowComponent {
     const sourceIsCx = this.columns[originalArg.colIdx].isCx;
     let prefix = 'Ref:';
     if (sourceIsCx) prefix = 'Grant in CX:'; else if (isSkip) prefix = `Ref (${sourceName}):`;
-    this.arguments.update(args => [...args, { id: crypto.randomUUID(), text: `${prefix} "${originalArg.text.substring(0, 15)}..."`, colIdx: targetIdx, status: 'open', parentId: originalArg.id, isVoter: false }]);
+    this.arguments.update(args => [...args, { id: crypto.randomUUID(), text: `${prefix} "${originalArg.text.substring(0, 15)}..."`, colIdx: targetIdx, status: 'open', parentId: originalArg.id, isVoter: false, comments: '' }]);
     this.activeLinkId.set(null);
   }
   addArg(event: any, colIdx: number) { 
     const text = event.target.value.trim();
     if (!text) return;
-    this.arguments.update(args => [...args, { id: crypto.randomUUID(), text, colIdx, status: 'open', parentId: null, isVoter: false }]);
+    this.arguments.update(args => [...args, { id: crypto.randomUUID(), text, colIdx, status: 'open', parentId: null, isVoter: false, comments: '' }]);
     event.target.value = '';
   }
   getArgsForCol(idx: number) { return this.arguments().filter(a => a.colIdx === idx); }
