@@ -1,5 +1,5 @@
 import { Injectable, signal } from '@angular/core';
-import { DEBATE_TERMS } from './glossary.data';
+import { DEBATE_TERMS } from '../../core/glossary.data';
 
 @Injectable({ providedIn: 'root' })
 export class TooltipService {

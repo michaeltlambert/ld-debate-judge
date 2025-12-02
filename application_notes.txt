@@ -1,0 +1,214 @@
+Here is a comprehensive `README.md` file documenting the **DebateMate (LD Debate Judge)** application. It is structured to cater to Product Owners (features), UX Designers (flow/interface), and Developers (architecture/code).
+
+-----
+
+# DebateMate: Lincoln-Douglas Adjudication Platform
+
+## 📘 Project Overview
+
+**DebateMate** is a real-time, single-page application (SPA) designed to manage Lincoln-Douglas (LD) debate tournaments. It digitizes the entire lifecycle of a debate round—from tournament creation and pairing to real-time "flowing" (note-taking), timing, and ballot submission.
+
+The application serves three distinct user roles with specific interfaces: **Admins**, **Judges**, and **Debaters**.
+
+-----
+
+## 🌟 Features by Role (For Product Owners)
+
+### 1\. Administrator (Tournament Manager)
+
+  * **Multi-Tournament Management:** Create, switch between, and archive multiple independent tournaments.
+  * **Dashboard Control:** View active debates, standings, and judge assignments in real-time.
+  * **Round Management:**
+      * Create **Preliminary Rounds** (random or manual pairing) and **Elimination Rounds** (Brackets: Octofinals to Finals).
+      * Assign up to 3 Judges per round.
+      * "Nudge" judges who haven't submitted ballots.
+      * Finalize rounds to update win/loss records.
+  * **Participant Management:**
+      * View Judges and Debaters lists.
+      * Toggle Debater status (Active vs. Eliminated).
+      * Kick users from the tournament.
+  * **Ballot Inspection:** View submitted ballots with point breakdowns and Reasons for Decision (RFD).
+
+### 2\. Judge (Adjudicator)
+
+  * **Digital Ballot:** Auto-calculates the winner based on speaker points (with manual override capability).
+  * **Interactive Flow Sheet:**
+      * A specialized 7-column note-taking interface (1AC, CX, 1NC, etc.).
+      * **Argument Linking:** Visually link rebuttals to previous arguments.
+      * **Status Tracking:** Mark arguments as "Dropped" (conceded), "Addressed", or "Voting Issue" (Star icon).
+      * \*\*Framework Tracking:\*\*Dedicated fields for Value Premise and Value Criterion.
+  * **Debate Timer:** Integrated timer with phase-specific presets (speech time vs. prep time) and visual cues.
+  * **PDF Export:** Download a PDF containing both the official ballot and the flow sheet notes.
+
+### 3\. Debater (Participant)
+
+  * **Profile & Stats:** View personal Win/Loss record and total rounds debated.
+  * **History:** Access past ballots and feedback (RFDs) from judges.
+  * **Read-Only Flow:** View the judge's flow sheet after the round (if allowed) for educational feedback.
+  * **Join via Code:** Enter a 6-digit alphanumeric code to join a specific tournament.
+
+-----
+
+## 🎨 User Flow & UX (For Designers)
+
+The application uses a **Virtual Routing** strategy. It does not use the browser URL for deep navigation; instead, the view changes based on the user's state (`User Role` + `Active Tournament` + `Active Round`).
+
+### High-Level User Journey
+
+1.  **Authentication:** User Lands $\rightarrow$ Login/Register (Email & Password).
+2.  **Role Selection:** User selects Admin, Judge, or Debater during registration.
+3.  **Onboarding:**
+      * *Admin:* Redirected to Tournament List $\rightarrow$ Create New or Select Existing.
+      * *Judge/Debater:* Redirected to Profile $\rightarrow$ Enter Tournament Code to join.
+4.  **The "Active" State:**
+      * Once a user is linked to a tournament, they enter the **Main Dashboard**.
+      * *Debater:* Sees "Your Assignments" (Waiting for pairing).
+      * *Judge:* Sees assigned rounds.
+5.  **The Debate Round (The "Room"):**
+      * When a round opens, the view transforms into the **Adjudication Interface**.
+      * **Top Bar:** Timers (Aff Prep, Neg Prep, Speech Timer).
+      * **Center:** The "Flow" component (Horizontal scrolling columns).
+      * **Bottom:** Sticky footer for Ballot entry (Scores/Decision).
+
+### Key UI Components
+
+  * **`FlowComponent`:** The most complex UI element. It mimics a spreadsheet but allows nesting arguments. It supports distinct visual states for "Dropped" (Red), "Voter" (Purple/Star), and "Addressed" (Green).
+  * **`TimerComponent`:** Sticky header. Changes color based on active state (Speech vs. Prep).
+  * **`BallotComponent`:** Slide-up panel from the bottom. Contains validation logic (points 0-30).
+
+-----
+
+## 🏗️ Technical Architecture (For Developers)
+
+### Tech Stack
+
+  * **Framework:** Angular 21 (Latest).
+  * **Paradigm:** Standalone Components, Signal-based State Management.
+  * **Styling:** Tailwind CSS v4.1.
+  * **Backend / Persistence:** Firebase v12 (Firestore & Auth).
+  * **Build Tool:** Vite (via Angular CLI).
+  * **Testing:** Vitest.
+
+### State Management: "Signal Store"
+
+The application uses a **Store-less Service Architecture**. All state is managed within `TournamentService` using Angular Signals.
+
+  * **`TournamentService`:** Acts as the single source of truth.
+      * `userProfile` (Signal): Holds current user data.
+      * `debates` (Signal): Array of all debates in the tournament (synced via Firestore `onSnapshot`).
+      * `results` (Signal): Array of all ballots.
+      * `notifications` (Signal): Real-time alerts.
+  * **Reactivity:** Components use `computed()` signals to derive data (e.g., `AdminComponent` computes `sortedDebaters` based on the `standings` computed signal in the service).
+
+### Data Persistence (Firestore)
+
+The database uses a hierarchical structure under a root `artifacts` collection to separate tenants (apps).
+
+**Path Structure:** `artifacts/{appId}/public/data/...`
+
+  * `tournaments/{tid}`: Meta data for the event.
+  * `judges/{uid}`: User profiles with role 'Judge'.
+  * `debaters/{uid}`: User profiles with role 'Debater'.
+  * `debates/{debateId}`: Round metadata (topic, staging, status).
+  * `results/{debateId_judgeId}`: The actual ballot and flow data.
+
+### Virtual Routing Strategy
+
+**Important:** The file `app.routes.ts` is empty. The application does **not** use the standard Angular Router for page navigation.
+
+  * **Mechanism:** `AppComponent` acts as a shell. It watches `tournament.userProfile()` and `tournament.tournamentId()`.
+  * **Logic:**
+      * If no user $\rightarrow$ Show `<app-login>`.
+      * If Admin & No Tournament Selected $\rightarrow$ Show `<app-tournament-list>`.
+      * If Admin & Tournament Selected $\rightarrow$ Show `<app-admin>`.
+      * If Participant $\rightarrow$ Show Shell + (`<app-profile>` OR `<app-flow>`).
+
+### Installation & Configuration
+
+1.  **Environment Setup:**
+    The application relies on `src/app/config.ts`. You must configure your Firebase keys here.
+
+    ```typescript
+    // src/app/config.ts
+    export const AppConfig = {
+      firebase: {
+        apiKey: "...",
+        // ... other firebase config
+      },
+      features: {
+        enableOfflineMode: true // Set to false for production
+      }
+    };
+    ```
+
+2.  **Running Locally:**
+
+    ```bash
+    npm install
+    npm start
+    ```
+
+3.  **Deploying:**
+    Standard Angular build:
+
+    ```bash
+    npm run build
+    ```
+
+### Key Services Documentation
+
+  * **`DebateService`**:
+
+      * Manages the specialized LD Debate clock.
+      * Contains the definitions for the 7 phases of LD Debate (1AC, CX1, 1NC, etc.).
+      * Uses `setInterval` driven by Signals for timing.
+
+  * **`PdfService`**:
+
+      * Uses `html-to-image` to take snapshots of the DOM nodes `#debate-ballot` and `#debate-flow`.
+      * Uses `jspdf` to stitch these images into a downloadable PDF.
+
+  * **`FlowComponent` Logic**:
+
+      * Data is stored locally in `localStorage` (`ld-flow-args`) while editing to prevent data loss on refresh.
+      * On submission, data is synced to Firestore via `TournamentService`.
+      * Arguments have a `colIdx` (0-6) mapping to the debate phases.
+
+### Glossary Data
+
+`glossary.data.ts` contains a dictionary of debate terms. This is used by `TermComponent` and `TooltipService` to provide hover-over definitions for beginners (e.g., explaining what "Tabula Rasa" means).
+
+-----
+
+## ⚠️ Known Constraints / Notes
+
+1.  **Offline Mode:** If Firebase config is invalid or missing, the app catches the error and attempts to run in a limited "Demo/Offline" mode (`TournamentService` constructor).
+2.  **Component Routing:** Adding a new "Page" requires updating the `template` logic in `AppComponent`, not adding a route to the router config.
+3.  **Tailwind 4:** Uses the new `@theme` directive in `styles.css`. Ensure your IDE supports Tailwind v4 syntax highlighting.
+
+
+
+
+
+
+
+
+-----
+
+
+
+
+without removing any original functionality and using architectural best practices and principles and angular code best practices resolve this error:
+
+_untracked-chunk.mjs:2572 ERROR ɵNotFound: NG0201: No provider found for `ActivatedRoute`. Source: Standalone[_AppComponent]. Find more at https://v21.angular.dev/errors/NG0201
+    at createRuntimeError (_untracked-chunk.mjs:555:17)
+    at NullInjector.get (_untracked-chunk.mjs:836:21)
+    at R3Injector.get (_untracked-chunk.mjs:1192:27)
+    at R3Injector.get (_untracked-chunk.mjs:1192:27)
+    at R3Injector.get (_untracked-chunk.mjs:1192:27)
+    at ChainedInjector.get (_debug_node-chunk.mjs:7456:32)
+    at lookupTokenUsingModuleInjector (_debug_node-chunk.mjs:890:31)
+    at getOrCreateInjectable (_debug_node-chunk.mjs:913:10)
+    at ɵɵdirectiveInject (_debug_node-chunk.mjs:7490:17)
+    at NodeInjectorFactory.RouterLink_Factory [as factory] (_router_module-chunk.mjs:169:83)
+
