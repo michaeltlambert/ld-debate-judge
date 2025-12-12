@@ -35,3 +35,8 @@ Why: It keeps your frontend and backend (Firestore/Auth) in the same Google Clou
 2. **Login:** firebase login
 3. **Initialize:** firebase init (Select Hosting, choose your existing ld-debate-judge project, and set your public directory to dist/ld-debate-judge/browser).
 4. **Deploy:** ng build followed by firebase deploy.
+
+## To add new files to git:
+1. **Stage all changes: This command adds all modified, new, or deleted files in your working directory to the Git staging area, preparing them for a commit** git add -a
+2. **Commit the changes: This command records the staged changes in your local repository with a descriptive message.** git commit -m "message"
+3. **Push the changes to the remote repository: This uploads your local commits to the trunk branch on the remote repository (usually named origin).** git push origin main 
