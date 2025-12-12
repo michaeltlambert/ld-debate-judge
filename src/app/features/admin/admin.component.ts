@@ -21,9 +21,12 @@ import { Debate, RoundType, RoundResult } from '../../core/models';
           </div>
         </div>
         <div class="flex items-center gap-4">
-           <button (click)="backToList()" class="text-sm font-bold text-slate-500 hover:text-slate-800 underline">Switch Tournament</button>
-           <button *ngIf="!tournament.isTournamentClosed()" (click)="closeTournament()" class="text-xs font-bold bg-red-50 text-red-600 px-3 py-2 rounded hover:bg-red-100 transition-colors border border-red-100">End Tournament</button>
-           <button (click)="tournament.logout()" class="text-sm font-bold text-red-500 hover:text-red-700 underline ml-4">Log Out</button>
+           <button (click)="backToList()" class="text-sm font-bold text-slate-500 hover:text-slate-800 underline" title="Switch Tournament">Switch Tournament</button>
+           
+           <button *ngIf="!tournament.isTournamentClosed()" (click)="closeTournament()" class="text-xs font-bold bg-red-50 text-red-600 px-3 py-2 rounded hover:bg-red-100 transition-colors border border-red-100" title="End Tournament">End Tournament</button>
+           <div *ngIf="tournament.isTournamentClosed()" class="text-xs font-bold bg-gray-100 text-gray-500 px-3 py-2 rounded border border-gray-200">ARCHIVED</div>
+           
+           <button (click)="tournament.logout()" class="text-sm font-bold text-red-500 hover:text-red-700 underline ml-4" title="Log Out">Log Out</button>
         </div>
       </header>
 
@@ -31,12 +34,52 @@ import { Debate, RoundType, RoundResult } from '../../core/models';
           This tournament is closed. All data is Read-Only.
       </div>
       
+      <div *ngIf="selectedBallot()" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" (click)="selectedBallot.set(null)">
+        <div class="bg-white rounded-xl shadow-2xl max-w-lg w-full p-6" (click)="$event.stopPropagation()">
+           <div class="flex justify-between items-start mb-4">
+              <div>
+                  <h3 class="text-lg font-bold text-slate-800">Ballot Details</h3>
+                  <p class="text-sm text-slate-500">Judge: {{ selectedBallot()?.judgeName }}</p>
+              </div>
+              <button (click)="selectedBallot.set(null)" class="text-slate-400 hover:text-slate-600">&times;</button>
+           </div>
+           
+           <div class="grid grid-cols-2 gap-4 mb-4">
+              <div class="p-3 rounded bg-blue-50 text-center border border-blue-100">
+                  <div class="text-xs font-bold text-blue-600 uppercase">Affirmative</div>
+                  <div class="text-xs text-blue-800 font-medium mb-1 truncate">{{ getDebate(selectedBallot()?.debateId)?.affName }}</div>
+                  <div class="text-2xl font-bold text-slate-800">{{ selectedBallot()?.affScore }}</div>
+              </div>
+              <div class="p-3 rounded bg-red-50 text-center border border-red-100">
+                  <div class="text-xs font-bold text-red-600 uppercase">Negative</div>
+                   <div class="text-xs text-red-800 font-medium mb-1 truncate">{{ getDebate(selectedBallot()?.debateId)?.negName }}</div>
+                  <div class="text-2xl font-bold text-slate-800">{{ selectedBallot()?.negScore }}</div>
+              </div>
+           </div>
+           
+           <div class="mb-4">
+              <span class="text-xs font-bold uppercase tracking-wider text-slate-500">Decision</span>
+              <div class="font-bold text-lg" [ngClass]="selectedBallot()?.decision === 'Aff' ? 'text-blue-600' : 'text-red-600'">
+                  Voted for: {{ selectedBallot()?.decision }}
+              </div>
+           </div>
+
+           <div>
+              <span class="text-xs font-bold uppercase tracking-wider text-slate-500">Reason for Decision (RFD)</span>
+              <div class="mt-1 p-3 bg-slate-50 rounded border border-slate-200 text-sm text-slate-700 whitespace-pre-wrap max-h-60 overflow-y-auto">
+                  {{ selectedBallot()?.rfd || 'No written feedback provided.' }}
+              </div>
+           </div>
+        </div>
+      </div>
+
       <main class="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8">
+        
         <div class="col-span-12 flex gap-4 mb-4 border-b border-slate-200">
             <button (click)="activeTab.set('Dashboard')" [class.border-slate-800]="activeTab()==='Dashboard'" class="pb-2 border-b-2 border-transparent font-bold text-sm">Rounds</button>
             <button (click)="activeTab.set('Bracket')" [class.border-slate-800]="activeTab()==='Bracket'" class="pb-2 border-b-2 border-transparent font-bold text-sm">Bracket</button>
         </div>
-        
+
         <div *ngIf="activeTab() === 'Dashboard'" class="contents">
              <div class="lg:col-span-4 space-y-6">
                  <div *ngIf="!tournament.isTournamentClosed()" class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
@@ -70,16 +113,19 @@ import { Debate, RoundType, RoundResult } from '../../core/models';
                       <button (click)="create()" class="w-full bg-slate-900 text-white font-bold py-3 rounded-lg hover:bg-slate-800" title="Create Matchup">Create Matchup</button>
                     </div>
                  </div>
+                 
                  <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                     <h2 class="font-bold text-slate-800 mb-4">Participants</h2>
                     <div class="mb-4">
                         <h3 class="text-xs font-bold text-slate-500 uppercase mb-2">Debaters ({{ sortedDebaters().length }})</h3>
                         <div class="max-h-48 overflow-y-auto space-y-2">
                              <div *ngFor="let d of sortedDebaters()" class="flex justify-between text-sm p-2 bg-slate-50 rounded">
-                                 <span [class.line-through]="d.status === 'Eliminated'" [class.text-slate-400]="d.status === 'Eliminated'">{{ d.name }}</span>
+                                 <span [class.line-through]="d.status === 'Eliminated'" [class.text-slate-400]="d.status === 'Eliminated'">
+                                     {{ d.name }} <span class="text-xs font-bold ml-1" [class.text-green-600]="d.status!=='Eliminated'">({{d.wins}}W - {{d.losses}}L)</span>
+                                 </span>
                                  <div class="flex gap-2">
-                                     <button *ngIf="!tournament.isTournamentClosed()" (click)="toggleStatus(d)">{{ d.status === 'Eliminated' ? '❤️' : '💀' }}</button>
-                                     <button *ngIf="!tournament.isTournamentClosed()" (click)="tournament.kickUser(d.id, 'Debater')" class="text-red-500">&times;</button>
+                                     <button *ngIf="!tournament.isTournamentClosed()" (click)="toggleStatus(d)" title="Toggle Status">{{ d.status === 'Eliminated' ? '❤️' : '💀' }}</button>
+                                     <button *ngIf="!tournament.isTournamentClosed()" (click)="tournament.kickUser(d.id, 'Debater')" class="text-red-500" title="Kick User">&times;</button>
                                  </div>
                              </div>
                         </div>
@@ -89,7 +135,7 @@ import { Debate, RoundType, RoundResult } from '../../core/models';
                         <div class="max-h-48 overflow-y-auto space-y-2">
                              <div *ngFor="let j of sortedJudges()" class="flex justify-between text-sm p-2 bg-slate-50 rounded">
                                  <span>{{ j.name }}</span>
-                                 <button *ngIf="!tournament.isTournamentClosed()" (click)="tournament.kickUser(j.id, 'Judge')" class="text-red-500">&times;</button>
+                                 <button *ngIf="!tournament.isTournamentClosed()" (click)="tournament.kickUser(j.id, 'Judge')" class="text-red-500" title="Kick User">&times;</button>
                              </div>
                         </div>
                     </div>
@@ -101,41 +147,70 @@ import { Debate, RoundType, RoundResult } from '../../core/models';
                      <div class="flex justify-between items-start mb-4 border-b border-slate-100 pb-3">
                         <div>
                             <div class="flex items-center gap-3">
-                                <span class="text-[10px] font-bold uppercase px-2 py-0.5 rounded">{{ debate.stage }}</span>
+                                <span class="text-[10px] font-bold uppercase px-2 py-0.5 rounded" [ngClass]="debate.type === 'Elimination' ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-600'">{{ debate.stage }}</span>
                                 <h3 class="font-bold text-lg text-slate-800">{{ debate.topic }}</h3>
+                                <span *ngIf="debate.status === 'Closed' && getWinner(debate.id) !== 'Pending'" class="bg-yellow-100 text-yellow-800 text-[10px] px-2 py-0.5 rounded font-bold border border-yellow-200">🏆 WINNER: {{ getWinnerName(debate) }}</span>
                             </div>
                             <div class="text-sm text-slate-500 mt-1">{{ debate.affName }} vs {{ debate.negName }}</div>
                         </div>
                         <div class="flex gap-2 items-center" *ngIf="!tournament.isTournamentClosed()">
                             <div class="relative" *ngIf="debate.status === 'Open'">
-                                <select #assignSelect (change)="assign(debate.id, assignSelect.value); assignSelect.value=''" class="bg-slate-100 border border-slate-300 text-slate-700 text-xs font-bold py-2 px-3 rounded">
+                                <select #assignSelect (change)="assign(debate.id, assignSelect.value); assignSelect.value=''" class="bg-slate-100 border border-slate-300 text-slate-700 text-xs font-bold py-2 px-3 rounded focus:outline-none hover:bg-slate-200 cursor-pointer">
                                     <option value="" disabled selected>+ Add Judge</option>
                                     <option *ngFor="let judge of getUnassignedJudges(debate)" [value]="judge.id">{{ judge.name }}</option>
                                 </select>
                             </div>
-                            <button *ngIf="debate.status === 'Open'" (click)="tournament.finalizeRound(debate.id)" class="bg-slate-800 text-white text-xs font-bold px-3 py-2 rounded">Finalize</button>
-                            <button (click)="tournament.deleteDebate(debate.id)" class="text-slate-300 hover:text-red-500 p-2">Del</button>
+                            <button *ngIf="debate.status === 'Open'" (click)="tournament.finalizeRound(debate.id)" class="bg-slate-800 text-white text-xs font-bold px-3 py-2 rounded hover:bg-slate-900" title="Finalize Round">Finalize</button>
+                            <button (click)="tournament.deleteDebate(debate.id)" class="text-slate-300 hover:text-red-500 p-2" title="Delete Debate"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" /></svg></button>
                         </div>
                      </div>
                      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                         <div *ngFor="let judgeId of debate.judgeIds" class="bg-slate-50 rounded-lg p-3 border border-slate-200 relative group">
                             <div class="flex justify-between items-center mb-1">
-                                <span class="text-xs font-bold text-slate-700 flex items-center gap-2">{{ getJudgeName(judgeId) }}</span>
-                                <button *ngIf="debate.status === 'Open' && !tournament.isTournamentClosed()" (click)="remove(debate.id, judgeId)" class="text-slate-300 hover:text-red-500 font-bold text-xs">Remove</button>
+                                <span class="text-xs font-bold text-slate-700 flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-green-500"></span> {{ getJudgeName(judgeId) }}</span>
+                                <button *ngIf="debate.status === 'Open' && !tournament.isTournamentClosed()" (click)="remove(debate.id, judgeId)" class="text-slate-300 hover:text-red-500 font-bold text-xs" title="Unassign Judge">Remove</button>
                             </div>
-                            <div *ngIf="getResult(debate.id, judgeId) as res; else pending" (click)="selectedBallot.set(res)" class="cursor-pointer hover:bg-slate-100 p-2 rounded">
-                                <span [class.text-blue-600]="res.decision === 'Aff'" [class.text-red-600]="res.decision === 'Neg'">Voted: {{ res.decision }}</span>
+                            
+                            <div *ngIf="getResult(debate.id, judgeId) as res; else pending" 
+                                 (click)="selectedBallot.set(res)"
+                                 class="animate-in fade-in bg-white p-2 rounded border border-slate-100 mt-2 cursor-pointer hover:border-blue-300 transition-colors hover:shadow-sm group/ballot"
+                                 title="Click to view full ballot">
+                                <div class="flex justify-between text-xs font-bold mb-1">
+                                    <span [class.text-blue-600]="res.decision === 'Aff'" [class.text-red-600]="res.decision === 'Neg'">Voted: {{ res.decision }}</span>
+                                </div>
+                                <div class="grid grid-cols-2 gap-2 text-center my-1">
+                                     <div class="bg-blue-50 rounded px-1"><span class="text-[10px] font-bold text-blue-600">AFF</span><span class="text-sm font-bold text-slate-700 block leading-none">{{ res.affScore }}</span></div>
+                                     <div class="bg-red-50 rounded px-1"><span class="text-[10px] font-bold text-red-600">NEG</span><span class="text-sm font-bold text-slate-700 block leading-none">{{ res.negScore }}</span></div>
+                                </div>
+                                <div class="text-[10px] text-slate-400 mt-1 text-center group-hover/ballot:text-blue-500">Click to view details</div>
                             </div>
+                            
                             <ng-template #pending>
                                 <div class="flex items-center justify-between w-full mt-2 pl-2">
                                     <span class="text-[10px] text-slate-400">Pending...</span>
-                                    <button *ngIf="!tournament.isTournamentClosed()" (click)="tournament.sendNudge(judgeId, debate.id)" class="text-[10px] bg-amber-100 text-amber-700 px-2 py-1 rounded">🔔 Nudge</button>
+                                    <button *ngIf="!tournament.isTournamentClosed()" (click)="tournament.sendNudge(judgeId, debate.id)" class="text-[10px] bg-amber-100 text-amber-700 px-2 py-1 rounded hover:bg-amber-200 font-bold flex items-center gap-1" title="Send reminder notification">🔔 Nudge</button>
                                 </div>
                             </ng-template>
                         </div>
+                         <div *ngIf="debate.judgeIds.length === 0" class="col-span-2 text-center py-4 border-2 border-dashed border-slate-100 rounded-lg text-slate-300 text-xs italic">Waiting for judges.</div>
                     </div>
                 </div>
              </div>
+        </div>
+
+        <div *ngIf="activeTab() === 'Bracket'" class="col-span-12 lg:col-span-12 w-full overflow-x-auto pb-8">
+           <div class="flex gap-8 min-w-max">
+              <div *ngFor="let stage of bracketStages" class="w-64 flex-none space-y-4">
+                  <h3 class="font-bold text-center text-slate-500 uppercase tracking-widest text-xs mb-4 sticky top-0 bg-slate-100 py-2">{{ stage }}</h3>
+                  <div *ngFor="let d of getDebatesForStage(stage)" class="bg-white border border-slate-200 rounded-lg shadow-sm p-3 relative">
+                      <div class="text-[10px] text-slate-400 mb-2 truncate font-mono">{{ d.topic }}</div>
+                      <div class="space-y-1">
+                         <div class="flex justify-between p-1 rounded text-xs font-bold" [class.bg-green-100]="d.status === 'Closed' && getWinner(d.id) === 'Aff'"><span>{{ d.affName }}</span><span *ngIf="d.status === 'Closed' && getWinner(d.id) === 'Aff'">✓</span></div>
+                         <div class="flex justify-between p-1 rounded text-xs font-bold" [class.bg-green-100]="d.status === 'Closed' && getWinner(d.id) === 'Neg'"><span>{{ d.negName }}</span><span *ngIf="d.status === 'Closed' && getWinner(d.id) === 'Neg'">✓</span></div>
+                      </div>
+                  </div>
+              </div>
+           </div>
         </div>
       </main>
     </div>
