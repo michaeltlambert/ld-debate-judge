@@ -23,6 +23,17 @@ import { RoundResult } from '../../core/models';
                <p class="text-sm text-slate-500 mb-4">{{ profile()?.email }}</p>
                <span class="bg-slate-100 text-slate-600 px-3 py-1 rounded-full text-xs font-bold uppercase">{{ profile()?.role }}</span>
                
+               <div *ngIf="profile()?.role === 'Admin'" 
+                    (click)="goToAdmin()"
+                    class="mt-6 border border-yellow-300 bg-yellow-100 p-3 rounded-lg cursor-pointer hover:bg-yellow-200 transition-colors">
+                   <p class="text-xs font-bold text-yellow-800 uppercase flex items-center justify-center gap-2">
+                       <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
+                           <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6h9.75a2.25 2.25 0 0 1 2.25 2.25v7.5a2.25 2.25 0 0 1-2.25 2.25h-9.75m-4.5 0A2.25 2.25 0 0 1 3.75 16.5V3.75a2.25 2.25 0 0 1 2.25-2.25h10.5a2.25 2.25 0 0 1 2.25 2.25v1.5a2.25 2.25 0 0 0-2.25-2.25H6a2.25 2.25 0 0 0-2.25 2.25v12.75Z" />
+                       </svg>
+                       Go to Admin Dashboard
+                   </p>
+               </div>
+
                <div class="mt-6 border-t border-slate-100 pt-4 text-left space-y-3">
                  <h3 class="text-xs font-bold text-slate-400 uppercase">Contact Info</h3>
                  <input [(ngModel)]="editPhone" class="w-full text-sm border-b border-slate-200 outline-none py-1" placeholder="Add phone number">
@@ -150,7 +161,13 @@ export class ProfileComponent {
   });
 
   myStats() { return this.tournament.getMyDebaterRecord(); }
-
+  
+  // Action for Admin to navigate to the Admin Dashboard
+  goToAdmin() {
+    // Navigate to the list of tournaments (where they can create or view)
+    this.router.navigate(['/tournaments']);
+  }
+  
   getHistory() {
      const uid = this.profile()?.id;
      if (!uid) return [];
